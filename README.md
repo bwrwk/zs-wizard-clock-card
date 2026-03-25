@@ -126,6 +126,11 @@ Supported `match` fields:
 - `not_home`
 - `entities` as extra conditions
 
+Matching semantics:
+
+- `states`, `zones`, `zone_entities` and `localities` are treated as alternative ways to identify the same place
+- movement and status gates like `min_speed`, `moving`, `proximity_directions`, `unknown`, `not_home` and `entities` are treated as additional requirements
+
 You can also use `zone_entities` on a place for an easier UI-driven setup:
 
 ```yaml

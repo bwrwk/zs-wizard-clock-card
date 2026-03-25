@@ -293,48 +293,54 @@ function matchesPlace(place, context, hass) {
     const locality = normalize(context.locality);
     const friendlyZone = normalize(context.friendlyZone);
     const proximity = normalize(context.proximity);
-    const checks = [];
+    const locationChecks = [];
+    const gatingChecks = [];
     if (match.states?.length) {
-        checks.push(normalizeList(match.states).includes(state));
+        locationChecks.push(normalizeList(match.states).includes(state));
     }
     if (match.zones?.length) {
         const configuredZones = normalizeList(match.zones);
-        checks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
+        locationChecks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
     }
     if (asArray(place.zone_entities).length) {
         const zoneMatches = getZoneMatchValues(place, hass);
-        checks.push(zoneMatches.includes(zone)
+        locationChecks.push(zoneMatches.includes(zone)
             || zoneMatches.includes(state)
             || zoneMatches.includes(friendlyZone));
     }
     if (match.localities?.length) {
-        checks.push(normalizeList(match.localities).includes(locality));
+        locationChecks.push(normalizeList(match.localities).includes(locality));
     }
     if (match.min_speed !== undefined) {
-        checks.push(context.speed >= Number(match.min_speed));
+        gatingChecks.push(context.speed >= Number(match.min_speed));
     }
     if (match.max_speed !== undefined) {
-        checks.push(context.speed <= Number(match.max_speed));
+        gatingChecks.push(context.speed <= Number(match.max_speed));
     }
     if (match.moving !== undefined) {
-        checks.push(context.moving === Boolean(match.moving));
+        gatingChecks.push(context.moving === Boolean(match.moving));
     }
     if (match.proximity_directions?.length) {
-        checks.push(normalizeList(match.proximity_directions).includes(proximity));
+        gatingChecks.push(normalizeList(match.proximity_directions).includes(proximity));
     }
     if (match.unavailable) {
-        checks.push(context.unavailable);
+        gatingChecks.push(context.unavailable);
     }
     if (match.unknown) {
-        checks.push(context.unknown);
+        gatingChecks.push(context.unknown);
     }
     if (match.not_home) {
-        checks.push(context.notHome);
+        gatingChecks.push(context.notHome);
     }
     if (match.entities?.length) {
-        checks.push(match.entities.every((condition) => evaluateEntityCondition(condition, hass)));
+        gatingChecks.push(match.entities.every((condition) => evaluateEntityCondition(condition, hass)));
     }
-    return checks.length > 0 && checks.every(Boolean);
+    const hasLocationLogic = locationChecks.length > 0;
+    const hasGatingLogic = gatingChecks.length > 0;
+    const locationMatches = hasLocationLogic ? locationChecks.some(Boolean) : true;
+    const gatingMatches = hasGatingLogic ? gatingChecks.every(Boolean) : true;
+    const hasAnyLogic = hasLocationLogic || hasGatingLogic;
+    return hasAnyLogic && locationMatches && gatingMatches;
 }
 function explainPlaceMatch(place, context, hass) {
     const reasons = [];
