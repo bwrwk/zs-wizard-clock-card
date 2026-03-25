@@ -70,6 +70,7 @@ type WizardConfig = {
   text_color?: string;
   ring_color?: string;
   avatar?: string;
+  show_avatar?: boolean;
   proximity_entity?: string;
 };
 
@@ -89,6 +90,9 @@ type CardConfig = {
     inner_glow?: boolean;
     danger_glow?: boolean;
     show_legend?: boolean;
+    show_center_panel?: boolean;
+    show_place_sectors?: boolean;
+    sector_opacity?: number;
   };
 };
 
@@ -102,6 +106,7 @@ type ResolvedWizard = {
   place: PlaceConfig;
   angle: number;
   placeIndex: number;
+  avatar?: string;
   entity?: HassEntity;
 };
 
@@ -136,6 +141,9 @@ const DEFAULT_CONFIG: CardConfig = {
     inner_glow: true,
     danger_glow: true,
     show_legend: true,
+    show_center_panel: true,
+    show_place_sectors: true,
+    sector_opacity: 0.16,
   },
 };
 
@@ -223,6 +231,28 @@ function buildArcPath(angle: number, radius: number, span = 0.56): string {
   return `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArc} 1 ${endX} ${endY}`;
 }
 
+function buildRingSlicePath(angle: number, innerRadius: number, outerRadius: number, width: number): string {
+  const startAngle = angle - width / 2;
+  const endAngle = angle + width / 2;
+  const outerStartX = polarX(startAngle, outerRadius);
+  const outerStartY = polarY(startAngle, outerRadius);
+  const outerEndX = polarX(endAngle, outerRadius);
+  const outerEndY = polarY(endAngle, outerRadius);
+  const innerEndX = polarX(endAngle, innerRadius);
+  const innerEndY = polarY(endAngle, innerRadius);
+  const innerStartX = polarX(startAngle, innerRadius);
+  const innerStartY = polarY(startAngle, innerRadius);
+  const largeArc = width > Math.PI ? 1 : 0;
+
+  return [
+    `M ${outerStartX} ${outerStartY}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerEndX} ${outerEndY}`,
+    `L ${innerEndX} ${innerEndY}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStartX} ${innerStartY}`,
+    'Z',
+  ].join(' ');
+}
+
 function computeInitials(name: string): string {
   const parts = name.split(' ').filter(Boolean).slice(0, 2);
   if (!parts.length) {
@@ -230,6 +260,26 @@ function computeInitials(name: string): string {
   }
 
   return parts.map((part) => part[0]?.toUpperCase() || '').join('');
+}
+
+function colorWithAlpha(color: string, alpha: number): string {
+  if (color.startsWith('rgb(')) {
+    return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+  }
+
+  if (color.startsWith('rgba(')) {
+    return color.replace(/,\s*[\d.]+\)$/, `, ${alpha})`);
+  }
+
+  if (color.startsWith('#') && (color.length === 7 || color.length === 4)) {
+    const normalized = color.length === 4
+      ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+      : color;
+    const hexAlpha = Math.round(clamp(alpha, 0, 1) * 255).toString(16).padStart(2, '0');
+    return `${normalized}${hexAlpha}`;
+  }
+
+  return color;
 }
 
 function getEntityAttribute(entity: HassEntity | undefined, attribute?: string): any {
@@ -508,12 +558,25 @@ class ZSWizardClockCard extends LitElement {
       background: rgba(255, 248, 230, 0.08);
       border: 1px solid rgba(255, 244, 217, 0.1);
       backdrop-filter: blur(10px);
+      color: inherit;
+      text-align: left;
+      width: 100%;
+      font: inherit;
+      cursor: pointer;
+      transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+    }
+
+    .legend-item:hover {
+      transform: translateY(-1px);
+      background: rgba(255, 248, 230, 0.12);
+      border-color: rgba(255, 244, 217, 0.18);
     }
 
     .legend-seal {
       width: 38px;
       height: 38px;
       border-radius: 999px;
+      overflow: hidden;
       display: grid;
       place-items: center;
       font-family: var(--zs-clock-title);
@@ -601,6 +664,28 @@ class ZSWizardClockCard extends LitElement {
     });
   }
 
+  get fallbackTextColor(): string {
+    return this.config.style?.text_color || this.selectedPreset.text;
+  }
+
+  get summaryPlace(): PlaceConfig | undefined {
+    const alerts = this.resolvedWizards.filter((wizard) => wizard.place.kind === 'alert');
+    if (alerts.length) {
+      return alerts[0].place;
+    }
+
+    const transient = this.resolvedWizards.filter((wizard) => wizard.place.kind === 'transient');
+    if (transient.length) {
+      return transient[0].place;
+    }
+
+    return this.resolvedWizards[0]?.place;
+  }
+
+  get alertCount(): number {
+    return this.resolvedWizards.filter((wizard) => wizard.place.kind === 'alert').length;
+  }
+
   resolvePlaceForWizard(wizard: WizardConfig): PlaceConfig {
     const entity = this.hass?.states?.[wizard.entity];
     const proximityEntity = wizard.proximity_entity ? this.hass?.states?.[wizard.proximity_entity] : undefined;
@@ -641,9 +726,25 @@ class ZSWizardClockCard extends LitElement {
         place,
         angle,
         placeIndex,
+        avatar: wizard.avatar || (wizard.show_avatar === false ? '' : entity?.attributes?.entity_picture || ''),
         entity,
       };
     });
+  }
+
+  getRotationForWizard(wizard: ResolvedWizard): number {
+    const group = this.resolvedWizards.filter((item) => item.placeIndex === wizard.placeIndex);
+    const groupIndex = group.findIndex((item) => item.entityId === wizard.entityId);
+    const spread = group.length > 1 ? ((groupIndex - (group.length - 1) / 2) / group.length) * 18 : 0;
+    return (wizard.angle * 180) / Math.PI + spread;
+  }
+
+  openMoreInfo(entityId: string) {
+    const event = new Event('hass-more-info', { bubbles: true, composed: true }) as Event & {
+      detail?: { entityId: string };
+    };
+    event.detail = { entityId };
+    this.dispatchEvent(event);
   }
 
   computeCardStyle() {
@@ -732,6 +833,18 @@ class ZSWizardClockCard extends LitElement {
           filter=${this.config.style?.inner_glow === false ? 'none' : 'url(#innerGlow)'}
         ></circle>
 
+        ${this.config.style?.show_place_sectors === false ? '' : places.map((place, index) => {
+          const angle = placeStep * index;
+          const sectorColor = colorWithAlpha(place.color || 'var(--zs-clock-accent)', Number(this.config.style?.sector_opacity ?? 0.16));
+          return svg`
+            <path
+              d=${buildRingSlicePath(angle, 22.5, 39.8, Math.max(placeStep - 0.1, 0.28))}
+              fill=${sectorColor}
+              opacity=${place.kind === 'alert' ? '0.8' : '1'}
+            ></path>
+          `;
+        })}
+
         ${supportsDangerGlow ? svg`
           <circle
             cx="50"
@@ -768,7 +881,51 @@ class ZSWizardClockCard extends LitElement {
           `;
         })}
 
-        ${resolved.map((wizard, index) => this.renderHand(wizard, index, resolved.length))}
+        ${resolved.map((wizard, index) => this.renderHand(wizard, index))}
+
+        ${this.config.style?.show_center_panel === false ? '' : svg`
+          <g>
+            <circle cx="50" cy="50" r="13.4" fill="rgba(34, 20, 9, 0.16)"></circle>
+            <circle
+              cx="50"
+              cy="50"
+              r="12.4"
+              fill="rgba(255, 251, 243, 0.16)"
+              stroke="color-mix(in srgb, var(--zs-clock-accent) 52%, white)"
+              stroke-width="0.35"
+            ></circle>
+            <text
+              x="50"
+              y="47.8"
+              text-anchor="middle"
+              font-family="var(--zs-clock-title)"
+              font-size="2.5"
+              fill=${this.fallbackTextColor}
+            >
+              ${this.summaryPlace?.short_label || this.summaryPlace?.label || 'Clock'}
+            </text>
+            <text
+              x="50"
+              y="52"
+              text-anchor="middle"
+              font-family="var(--zs-clock-copy)"
+              font-size="1.95"
+              fill="var(--zs-clock-muted)"
+            >
+              ${this.resolvedWizards.length} tracked
+            </text>
+            <text
+              x="50"
+              y="55.4"
+              text-anchor="middle"
+              font-family="var(--zs-clock-copy)"
+              font-size="1.75"
+              fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-muted)'}
+            >
+              ${this.alertCount ? `${this.alertCount} alert` : 'all watched'}
+            </text>
+          </g>
+        `}
 
         <circle cx="50" cy="50" r="5.1" fill="var(--zs-clock-rim)"></circle>
         <circle cx="50" cy="50" r="3.4" fill="var(--zs-clock-center)"></circle>
@@ -777,9 +934,8 @@ class ZSWizardClockCard extends LitElement {
     `;
   }
 
-  renderHand(wizard: ResolvedWizard, index: number, total: number) {
-    const spread = total > 1 ? ((index - (total - 1) / 2) / total) * 0.22 : 0;
-    const rotation = ((wizard.angle + spread) * 180) / Math.PI;
+  renderHand(wizard: ResolvedWizard, index: number) {
+    const rotation = this.getRotationForWizard(wizard);
     const tipY = 18;
     const labelRotation = rotation > 180 ? 180 : 0;
 
@@ -792,17 +948,32 @@ class ZSWizardClockCard extends LitElement {
           stroke-width="0.35"
         ></path>
         <circle cx="50" cy=${tipY} r="4.3" fill=${wizard.color} stroke=${wizard.ringColor} stroke-width="0.55"></circle>
-        <text
-          x="50"
-          y=${tipY + 1.1}
-          fill=${wizard.textColor}
-          font-family="var(--zs-clock-title)"
-          font-size="2.65"
-          text-anchor="middle"
-          dominant-baseline="middle"
-        >
-          ${wizard.initials}
-        </text>
+        ${wizard.avatar ? svg`
+          <clipPath id="avatar-clip-${index}">
+            <circle cx="50" cy=${tipY} r="3.55"></circle>
+          </clipPath>
+          <image
+            href=${wizard.avatar}
+            x="46.35"
+            y=${tipY - 3.65}
+            width="7.3"
+            height="7.3"
+            preserveAspectRatio="xMidYMid slice"
+            clip-path="url(#avatar-clip-${index})"
+          ></image>
+        ` : svg`
+          <text
+            x="50"
+            y=${tipY + 1.1}
+            fill=${wizard.textColor}
+            font-family="var(--zs-clock-title)"
+            font-size="2.65"
+            text-anchor="middle"
+            dominant-baseline="middle"
+          >
+            ${wizard.initials}
+          </text>
+        `}
         <g transform="translate(50 34) rotate(${labelRotation})">
           <text
             class="hand-label"
@@ -825,7 +996,11 @@ class ZSWizardClockCard extends LitElement {
     return html`
       <div class="legend">
         ${this.resolvedWizards.map((wizard) => html`
-          <div class="legend-item">
+          <button
+            class="legend-item"
+            @click=${() => this.openMoreInfo(wizard.entityId)}
+            title=${`Open ${wizard.name}`}
+          >
             <div
               class="legend-seal"
               style=${styleMap({
@@ -834,13 +1009,13 @@ class ZSWizardClockCard extends LitElement {
                 border: `1px solid ${wizard.ringColor}`,
               })}
             >
-              ${wizard.initials}
+              ${wizard.avatar ? html`<img src=${wizard.avatar} alt=${wizard.name} style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" />` : wizard.initials}
             </div>
             <div class="legend-copy">
               <div class="legend-name">${wizard.name}</div>
               <div class="legend-place">${wizard.place.label}</div>
             </div>
-          </div>
+          </button>
         `)}
       </div>
     `;

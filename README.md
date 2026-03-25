@@ -12,7 +12,7 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 - flexible place matching with zone, state, locality, speed and proximity rules
 - theme-aware visual presets for a magical brass-and-enamel look
 
-## Features in v0.1.0
+## Features in v0.2.0
 
 - Circular SVG clock face with decorative outer rings
 - Configurable places around the dial
@@ -20,6 +20,11 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 - Support for device trackers, person entities and calendars
 - Optional movement detection via speed and proximity sensors
 - Pretty hand animations
+- Smarter hand spreading when multiple people point to the same place
+- Entity picture avatars on hands and legend when available
+- Clickable legend entries that open Home Assistant more-info
+- Center medallion with summary state
+- Optional place sectors on the dial
 - Legend with each wizard's resolved status
 - Visual presets: `brass`, `parchment`, `ministry`
 
@@ -44,6 +49,8 @@ subtitle: The Burrow
 style:
   preset: brass
   danger_glow: true
+  show_center_panel: true
+  show_place_sectors: true
 places:
   - id: home
     label: W domu
@@ -91,6 +98,7 @@ wizards:
     name: Hermione
     color: "#855f2d"
     proximity_entity: sensor.home_hermione_direction_of_travel
+    show_avatar: true
 ```
 
 ## Place Matching
@@ -110,6 +118,22 @@ Supported `match` fields:
 - `unknown`
 - `not_home`
 - `entities` as extra conditions
+
+## Style Options
+
+Supported `style` fields:
+
+- `preset`
+- `ha_theme`
+- `accent_color`
+- `background`
+- `text_color`
+- `inner_glow`
+- `danger_glow`
+- `show_legend`
+- `show_center_panel`
+- `show_place_sectors`
+- `sector_opacity`
 
 Example:
 
