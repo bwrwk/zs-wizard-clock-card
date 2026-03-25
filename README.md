@@ -1,0 +1,130 @@
+# ZS Wizard Clock Card
+
+An elegant wizard-style family location clock for Home Assistant Lovelace.
+
+## Vision
+
+`zs-wizard-clock-card` is inspired by the Weasley family clock, but built as a more polished and more configurable custom card:
+
+- SVG-based dial instead of canvas
+- configurable places shown on the dial
+- per-person styling
+- flexible place matching with zone, state, locality, speed and proximity rules
+- theme-aware visual presets for a magical brass-and-enamel look
+
+## Features in v0.1.0
+
+- Circular SVG clock face with decorative outer rings
+- Configurable places around the dial
+- Automatic person-to-place resolution
+- Support for device trackers, person entities and calendars
+- Optional movement detection via speed and proximity sensors
+- Pretty hand animations
+- Legend with each wizard's resolved status
+- Visual presets: `brass`, `parchment`, `ministry`
+
+## Installation
+
+### HACS
+
+Add this repository as a custom frontend repository, then install `ZS Wizard Clock Card`.
+
+### Manual
+
+1. Copy `zs-wizard-clock-card.js` to `config/www/`
+2. Add `/local/zs-wizard-clock-card.js` as a Lovelace resource
+3. Add the card manually
+
+## Example
+
+```yaml
+type: custom:zs-wizard-clock-card
+title: Family Clock
+subtitle: The Burrow
+style:
+  preset: brass
+  danger_glow: true
+places:
+  - id: home
+    label: W domu
+    match:
+      states: [home]
+      zones: [home]
+  - id: work
+    label: W pracy
+    match:
+      zones: [work, biuro]
+      states: [work]
+  - id: school
+    label: W szkole
+    match:
+      zones: [school, szkola]
+  - id: travelling
+    label: W podróży
+    kind: transient
+    priority: 80
+    match:
+      moving: true
+      min_speed: 8
+      proximity_directions: [towards, away_from]
+  - id: danger
+    label: Śmiertelne niebezpieczeństwo
+    kind: alert
+    priority: 100
+    match:
+      entities:
+        - entity: input_boolean.family_danger
+          state: "on"
+  - id: unknown
+    label: Nieznane
+    kind: fallback
+default_place: unknown
+wizards:
+  - entity: person.harry
+    name: Harry
+    color: "#7a1f1f"
+    text_color: "#fff7eb"
+  - entity: person.ginny
+    name: Ginny
+    color: "#0f5b4f"
+  - entity: person.hermione
+    name: Hermione
+    color: "#855f2d"
+    proximity_entity: sensor.home_hermione_direction_of_travel
+```
+
+## Place Matching
+
+Places are resolved in descending priority, then in YAML order.
+
+Supported `match` fields:
+
+- `states`
+- `zones`
+- `localities`
+- `min_speed`
+- `max_speed`
+- `moving`
+- `proximity_directions`
+- `unavailable`
+- `unknown`
+- `not_home`
+- `entities` as extra conditions
+
+Example:
+
+```yaml
+match:
+  zones: [office]
+  states: [work]
+  entities:
+    - entity: binary_sensor.workday_sensor
+      state: "on"
+```
+
+## Development
+
+```bash
+npm install
+npm run build
+```
