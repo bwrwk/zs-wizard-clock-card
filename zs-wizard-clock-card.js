@@ -57,6 +57,7 @@ const DEFAULT_CONFIG = {
         show_center_panel: true,
         show_place_sectors: true,
         sector_opacity: 0.16,
+        show_ornaments: true,
     },
 };
 const PRESET_STYLES = {
@@ -171,6 +172,26 @@ function colorWithAlpha(color, alpha) {
     }
     return color;
 }
+function getEntityObjectId(entityId) {
+    return String(entityId || '').split('.').slice(1).join('.') || String(entityId || '');
+}
+function getZoneMatchValues(place, hass) {
+    const values = new Set();
+    for (const zoneEntityId of place.zone_entities || []) {
+        const zoneEntity = hass.states?.[zoneEntityId];
+        const objectId = getEntityObjectId(zoneEntityId);
+        if (objectId) {
+            values.add(normalize(objectId));
+        }
+        if (zoneEntity?.attributes?.friendly_name) {
+            values.add(normalize(zoneEntity.attributes.friendly_name));
+        }
+        if (zoneEntity?.state) {
+            values.add(normalize(zoneEntity.state));
+        }
+    }
+    return [...values];
+}
 function getEntityAttribute(entity, attribute) {
     if (!entity) {
         return undefined;
@@ -244,6 +265,7 @@ function matchesPlace(place, context, hass) {
     const state = normalize(context.state);
     const zone = normalize(context.zone);
     const locality = normalize(context.locality);
+    const friendlyZone = normalize(context.friendlyZone);
     const proximity = normalize(context.proximity);
     const checks = [];
     if (match.states?.length) {
@@ -251,6 +273,12 @@ function matchesPlace(place, context, hass) {
     }
     if (match.zones?.length) {
         checks.push(match.zones.map(normalize).includes(zone));
+    }
+    if (place.zone_entities?.length) {
+        const zoneMatches = getZoneMatchValues(place, hass);
+        checks.push(zoneMatches.includes(zone)
+            || zoneMatches.includes(state)
+            || zoneMatches.includes(friendlyZone));
     }
     if (match.localities?.length) {
         checks.push(match.localities.map(normalize).includes(locality));
@@ -293,11 +321,13 @@ class ZSWizardClockCard extends i$2 {
                 show_place_sectors: false,
                 show_center_panel: true,
                 show_legend: true,
+                show_ornaments: true,
             },
             places: [
                 {
                     id: 'home',
                     label: 'W domu',
+                    zone_entities: ['zone.home'],
                     match: {
                         states: ['home'],
                         zones: ['home'],
@@ -359,6 +389,7 @@ class ZSWizardClockCard extends i$2 {
                         { name: 'show_legend', selector: { boolean: {} } },
                         { name: 'show_center_panel', selector: { boolean: {} } },
                         { name: 'show_place_sectors', selector: { boolean: {} } },
+                        { name: 'show_ornaments', selector: { boolean: {} } },
                         {
                             name: 'sector_opacity',
                             selector: {
@@ -401,13 +432,23 @@ class ZSWizardClockCard extends i$2 {
                                     },
                                 },
                                 color: { selector: { text: {} } },
+                                zone_entities: {
+                                    selector: {
+                                        entity: {
+                                            multiple: true,
+                                            filter: [
+                                                { domain: 'zone' },
+                                            ],
+                                        },
+                                    },
+                                },
                                 match: {
                                     selector: {
                                         object: {
                                             fields: {
-                                                states: { selector: { object: {} } },
-                                                zones: { selector: { object: {} } },
-                                                localities: { selector: { object: {} } },
+                                                states: { selector: { text: { multiple: true } } },
+                                                zones: { selector: { text: { multiple: true } } },
+                                                localities: { selector: { text: { multiple: true } } },
                                                 min_speed: {
                                                     selector: {
                                                         number: { min: 0, max: 300, step: 1, mode: 'box' },
@@ -438,14 +479,34 @@ class ZSWizardClockCard extends i$2 {
                             label_field: 'name',
                             description_field: 'entity',
                             fields: {
-                                entity: { required: true, selector: { entity: {} } },
+                                entity: {
+                                    required: true,
+                                    selector: {
+                                        entity: {
+                                            filter: [
+                                                { domain: 'person' },
+                                                { domain: 'device_tracker' },
+                                                { domain: 'calendar' },
+                                            ],
+                                        },
+                                    },
+                                },
                                 name: { selector: { text: {} } },
                                 color: { selector: { text: {} } },
                                 text_color: { selector: { text: {} } },
                                 ring_color: { selector: { text: {} } },
                                 avatar: { selector: { text: {} } },
                                 show_avatar: { selector: { boolean: {} } },
-                                proximity_entity: { selector: { entity: {} } },
+                                proximity_entity: {
+                                    selector: {
+                                        entity: {
+                                            filter: [
+                                                { domain: 'sensor' },
+                                                { domain: 'proximity' },
+                                            ],
+                                        },
+                                    },
+                                },
                             },
                         },
                     },
@@ -466,6 +527,7 @@ class ZSWizardClockCard extends i$2 {
                     show_legend: 'Show legend',
                     show_center_panel: 'Show center panel',
                     show_place_sectors: 'Show place sectors',
+                    show_ornaments: 'Show ornaments',
                     sector_opacity: 'Sector opacity',
                     places: 'Places',
                     wizards: 'Wizards',
@@ -475,6 +537,7 @@ class ZSWizardClockCard extends i$2 {
                     kind: 'Kind',
                     priority: 'Priority',
                     color: 'Color',
+                    zone_entities: 'Zone entities',
                     match: 'Match rules',
                     states: 'States',
                     zones: 'Zones',
@@ -498,13 +561,15 @@ class ZSWizardClockCard extends i$2 {
                 const helpers = {
                     default_place: 'Fallback place ID used when no matching rule is found.',
                     show_place_sectors: 'Shows subtle colored sectors behind place labels on the dial.',
+                    show_ornaments: 'Shows decorative rim details around the clock face.',
                     sector_opacity: 'Controls how visible the sectors are when enabled.',
                     places: 'Define locations shown around the dial and how they match entity states.',
+                    zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
                     wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
                     match: 'Basic rule editor for common matching cases. Advanced YAML fields still work.',
                     avatar: 'Optional image URL used instead of entity_picture.',
                     show_avatar: 'If enabled, uses entity_picture when available.',
-                    proximity_entity: 'Optional sensor used to detect motion direction.',
+                    proximity_entity: 'Optional sensor or proximity entity used to detect motion direction.',
                 };
                 return helpers[schema.name];
             },
@@ -521,6 +586,14 @@ class ZSWizardClockCard extends i$2 {
     }
     getCardSize() {
         return 8;
+    }
+    getGridOptions() {
+        return {
+            columns: 12,
+            min_columns: 6,
+            rows: 8,
+            min_rows: 6,
+        };
     }
     get isDarkMode() {
         return Boolean(this.hass?.themes?.darkMode);
@@ -684,6 +757,35 @@ class ZSWizardClockCard extends i$2 {
           stroke-width="0.9"
           opacity="0.88"
         ></circle>
+        ${this.config.style?.show_ornaments === false ? '' : w `
+          ${places.map((_, index) => {
+            const angle = placeStep * index;
+            const ornamentX = polarX(angle, 43.15);
+            const ornamentY = polarY(angle, 43.15);
+            return w `
+              <circle
+                cx=${ornamentX}
+                cy=${ornamentY}
+                r="0.72"
+                fill="color-mix(in srgb, var(--zs-clock-accent) 75%, white)"
+                opacity="0.95"
+              ></circle>
+            `;
+        })}
+          ${[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle) => {
+            const starX = polarX(angle, 45.6);
+            const starY = polarY(angle, 45.6);
+            return w `
+              <g transform="translate(${starX} ${starY}) rotate(${(angle * 180) / Math.PI})">
+                <path
+                  d="M 0 -1.6 L 0.42 -0.42 L 1.6 0 L 0.42 0.42 L 0 1.6 L -0.42 0.42 L -1.6 0 L -0.42 -0.42 Z"
+                  fill="color-mix(in srgb, var(--zs-clock-accent) 82%, white)"
+                  opacity="0.88"
+                ></path>
+              </g>
+            `;
+        })}
+        `}
         <circle
           cx="50"
           cy="50"
@@ -796,7 +898,11 @@ class ZSWizardClockCard extends i$2 {
         const tipY = 18;
         const labelRotation = rotation > 180 ? 180 : 0;
         return w `
-      <g class="hand" style=${o({ transform: `rotate(${rotation}deg)` })}>
+      <g
+        class="hand"
+        style=${o({ transform: `rotate(${rotation}deg)` })}
+        @click=${() => this.openMoreInfo(wizard.entityId)}
+      >
         <path
           d="M 50 50 C 52.6 46.4, 54.2 37.2, 53.5 27.5 C 53 21.7, 51.6 18.8, 50 14.2 C 48.4 18.8, 47 21.7, 46.5 27.5 C 45.8 37.2, 47.4 46.4, 50 50 Z"
           fill=${wizard.color}
