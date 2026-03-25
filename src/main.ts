@@ -976,12 +976,15 @@ class ZSWizardClockCard extends LitElement {
 
         ${this.config.style?.show_place_sectors === false ? '' : places.map((place, index) => {
           const angle = placeStep * index;
-          const sectorColor = colorWithAlpha(place.color || 'var(--zs-clock-accent)', Number(this.config.style?.sector_opacity ?? 0.16));
+          const sectorOpacity = Number(this.config.style?.sector_opacity ?? 0.16);
+          const alertOpacity = place.kind === 'alert'
+            ? Math.max(sectorOpacity, 0.35)
+            : sectorOpacity;
           return svg`
             <path
               d=${buildRingSlicePath(angle, 22.5, 39.8, Math.max(placeStep - 0.1, 0.28))}
-              fill=${sectorColor}
-              opacity=${place.kind === 'alert' ? '0.8' : '1'}
+              fill=${place.color || 'var(--zs-clock-accent)'}
+              opacity=${String(alertOpacity)}
             ></path>
           `;
         })}

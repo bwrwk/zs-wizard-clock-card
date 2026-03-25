@@ -652,9 +652,6 @@ function mergeConfig(config) {
         wizards: config.wizards || [],
     };
 }
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
 function polarX(angle, radius) {
     return 50 + Math.cos(angle - Math.PI / 2) * radius;
 }
@@ -697,22 +694,6 @@ function computeInitials(name) {
         return '?';
     }
     return parts.map((part) => part[0]?.toUpperCase() || '').join('');
-}
-function colorWithAlpha(color, alpha) {
-    if (color.startsWith('rgb(')) {
-        return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
-    }
-    if (color.startsWith('rgba(')) {
-        return color.replace(/,\s*[\d.]+\)$/, `, ${alpha})`);
-    }
-    if (color.startsWith('#') && (color.length === 7 || color.length === 4)) {
-        const normalized = color.length === 4
-            ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
-            : color;
-        const hexAlpha = Math.round(clamp(alpha, 0, 1) * 255).toString(16).padStart(2, '0');
-        return `${normalized}${hexAlpha}`;
-    }
-    return color;
 }
 function getPlaceDialLabel(place) {
     return place.short_label || place.label;
@@ -1246,12 +1227,15 @@ class ZSWizardClockCard extends i$2 {
 
         ${this.config.style?.show_place_sectors === false ? '' : places.map((place, index) => {
             const angle = placeStep * index;
-            const sectorColor = colorWithAlpha(place.color || 'var(--zs-clock-accent)', Number(this.config.style?.sector_opacity ?? 0.16));
+            const sectorOpacity = Number(this.config.style?.sector_opacity ?? 0.16);
+            const alertOpacity = place.kind === 'alert'
+                ? Math.max(sectorOpacity, 0.35)
+                : sectorOpacity;
             return w `
             <path
               d=${buildRingSlicePath(angle, 22.5, 39.8, Math.max(placeStep - 0.1, 0.28))}
-              fill=${sectorColor}
-              opacity=${place.kind === 'alert' ? '0.8' : '1'}
+              fill=${place.color || 'var(--zs-clock-accent)'}
+              opacity=${String(alertOpacity)}
             ></path>
           `;
         })}
