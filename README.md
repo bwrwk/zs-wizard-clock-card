@@ -4,7 +4,7 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 
 ## Status
 
-Current release line: `0.7.0`
+Current release line: `0.8.0`
 
 This version includes:
 
@@ -13,6 +13,8 @@ This version includes:
 - automated tests for the core logic
 - a richer Home Assistant config editor
 - runtime i18n based on the Home Assistant/frontend language
+- more thematic copy in the card and config editor
+- clearer helper descriptions for fields in the modal editor
 
 ## Vision
 

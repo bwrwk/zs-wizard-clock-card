@@ -260,7 +260,7 @@ class ZSWizardClockCard extends LitElement {
         {
           type: 'expandable',
           name: 'style',
-          title: 'Style',
+          title: t.labels.style || 'Style',
           schema: [
             {
               name: 'preset',

@@ -13,7 +13,7 @@ describe('i18n', () => {
   });
 
   it('returns translated runtime strings', () => {
-    expect(getTranslations('pl').eyebrow).toBe('Obecnosc Czarodziejow');
+    expect(getTranslations('pl').eyebrow).toBe('Zegar Czarodziejow');
     expect(getTranslations('en').allWatched).toBe('all watched');
   });
 });

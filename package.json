@@ -1,6 +1,6 @@
 {
   "name": "zs-wizard-clock-card",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Magical family location clock card for Home Assistant Lovelace",
   "type": "module",
   "main": "src/main.ts",
