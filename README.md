@@ -4,7 +4,7 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 
 ## Status
 
-Current release line: `0.8.0`
+Current release line: `1.0.0`
 
 This version includes:
 
@@ -60,8 +60,8 @@ Add this repository as a custom frontend repository, then install `ZS Wizard Clo
 
 ```yaml
 type: custom:zs-wizard-clock-card
-title: Rodzina Werewkow
-subtitle: Tyniec
+title: Rodzina Weasleyów
+subtitle: Nora
 style:
   preset: brass
   danger_glow: true
@@ -88,9 +88,9 @@ places:
   - id: school
     label: W szkole
     match:
-      zones: [school, szkola]
+      zones: [school, szkoła]
   - id: travelling
-    label: W podrozy
+    label: W podróży
     kind: transient
     priority: 80
     match:
@@ -98,7 +98,7 @@ places:
       min_speed: 8
       proximity_directions: [towards, away_from]
   - id: danger
-    label: Smiertelne niebezpieczenstwo
+    label: Śmiertelne niebezpieczeństwo
     kind: alert
     priority: 100
     match:
@@ -110,8 +110,8 @@ places:
     kind: fallback
 default_place: unknown
 wizards:
-  - entity: person.bartlomiej_werewka
-    name: Bartek
+  - entity: person.harry_potter
+    name: Harry
 ```
 
 ## Place Matching
@@ -198,7 +198,7 @@ This covers card copy such as:
 - summary text in the center medallion
 - debug labels
 - empty-state copy
-- config form labels/helpers based on browser language
+- config form labels/helpers based on the active frontend language
 
 User-defined place labels remain exactly as configured in YAML.
 

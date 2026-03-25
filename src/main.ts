@@ -226,7 +226,7 @@ class ZSWizardClockCard extends LitElement {
         },
         {
           id: 'travelling',
-          label: editorLanguage === 'pl' ? 'W podrozy' : 'Travelling',
+          label: editorLanguage === 'pl' ? 'W podróży' : 'Travelling',
           kind: 'transient',
           priority: 80,
           match: {
