@@ -98,6 +98,7 @@ const dictionaries: Record<LocaleKey, Dictionary> = {
       sector_opacity: 'Controls how visible the sectors are when enabled.',
       places: 'Define locations shown around the dial and how they match entity states.',
       zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
+      short_label: 'Optional shorter name used on the dial when the main label is too long. The editor list still shows the full label.',
       wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
       match: 'Location fields are alternatives. Movement and status fields act as extra requirements.',
       avatar: 'Optional image URL used instead of entity_picture.',
@@ -185,6 +186,7 @@ const dictionaries: Record<LocaleKey, Dictionary> = {
       sector_opacity: 'Steruje widocznoscia sektorow, gdy sa wlaczone.',
       places: 'Zdefiniuj miejsca na tarczy i sposoby ich dopasowania.',
       zone_entities: 'Latwiejsza opcja: wybierz encje stref zamiast wpisywac nazwy recznie.',
+      short_label: 'Opcjonalna krotsza nazwa uzywana na tarczy, gdy glowna etykieta jest za dluga. Lista w edytorze nadal pokazuje pelna nazwe.',
       wizards: 'Sledzone osoby, trackery lub kalendarze pokazywane jako wskazowki.',
       match: 'Pola lokalizacji sa alternatywami. Pola ruchu i statusu sa dodatkowymi warunkami.',
       avatar: 'Opcjonalny URL obrazka zamiast entity_picture.',
@@ -215,6 +217,26 @@ export function getHassLanguage(hass?: HomeAssistant): LocaleKey {
 
 export function getBrowserLanguage(): LocaleKey {
   return normalizeLanguage(typeof navigator !== 'undefined' ? navigator.language : 'en');
+}
+
+export function getEditorLanguage(): LocaleKey {
+  const documentLanguage = typeof document !== 'undefined'
+    ? document.documentElement?.lang
+    : '';
+  const hassLanguage = typeof document !== 'undefined'
+    ? (document.querySelector('home-assistant') as any)?.hass?.language
+      || (document.querySelector('hc-main') as any)?.hass?.language
+    : '';
+  const browserLanguages = typeof navigator !== 'undefined'
+    ? navigator.languages?.find(Boolean)
+    : '';
+
+  return normalizeLanguage(
+    hassLanguage
+    || documentLanguage
+    || browserLanguages
+    || (typeof navigator !== 'undefined' ? navigator.language : 'en'),
+  );
 }
 
 export function getTranslations(language: LocaleKey): Dictionary {

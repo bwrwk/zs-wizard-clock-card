@@ -24,6 +24,8 @@ This version includes:
 - flexible place matching with zone, state, locality, speed and proximity rules
 - theme-aware visual presets for a magical brass-and-enamel look
 
+It is also inspired by the original Home Assistant wizard clock idea explored in [`malcolmrigg/wizard-clock-card`](https://github.com/malcolmrigg/wizard-clock-card), while using a separate implementation and codebase.
+
 ## Highlights
 
 - Circular SVG clock face with decorative outer rings
@@ -143,6 +145,20 @@ Matching semantics:
 - `states`, `zones`, `zone_entities` and `localities` are treated as alternative ways to identify the same place
 - movement and status gates like `min_speed`, `moving`, `proximity_directions`, `unknown`, `not_home` and `entities` are treated as additional requirements
 
+Long labels on the dial:
+
+- the dial does not wrap labels into two lines
+- if a label is long, the card automatically reduces the font size
+- for best results, use `short_label` for the dial and keep the full `label` for the editor and legend
+
+Example:
+
+```yaml
+- id: danger
+  label: Śmiertelne niebezpieczeństwo
+  short_label: Niebezpieczeństwo
+```
+
 ## Config Editor
 
 The Home Assistant config editor supports:
@@ -152,6 +168,12 @@ The Home Assistant config editor supports:
 - filtered proximity selectors
 - direct `zone.*` selection for places
 - nested extra entity conditions in `match.entities`
+
+If a place name is long:
+
+- the editor list keeps showing the full `label`
+- the dial prefers `short_label` when provided
+- if `short_label` is missing, the dial will try to shrink the text automatically
 
 The entity selectors are narrowed where it makes sense:
 

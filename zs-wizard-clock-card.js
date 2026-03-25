@@ -399,6 +399,7 @@ const dictionaries = {
             sector_opacity: 'Controls how visible the sectors are when enabled.',
             places: 'Define locations shown around the dial and how they match entity states.',
             zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
+            short_label: 'Optional shorter name used on the dial when the main label is too long. The editor list still shows the full label.',
             wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
             match: 'Location fields are alternatives. Movement and status fields act as extra requirements.',
             avatar: 'Optional image URL used instead of entity_picture.',
@@ -486,6 +487,7 @@ const dictionaries = {
             sector_opacity: 'Steruje widocznoscia sektorow, gdy sa wlaczone.',
             places: 'Zdefiniuj miejsca na tarczy i sposoby ich dopasowania.',
             zone_entities: 'Latwiejsza opcja: wybierz encje stref zamiast wpisywac nazwy recznie.',
+            short_label: 'Opcjonalna krotsza nazwa uzywana na tarczy, gdy glowna etykieta jest za dluga. Lista w edytorze nadal pokazuje pelna nazwe.',
             wizards: 'Sledzone osoby, trackery lub kalendarze pokazywane jako wskazowki.',
             match: 'Pola lokalizacji sa alternatywami. Pola ruchu i statusu sa dodatkowymi warunkami.',
             avatar: 'Opcjonalny URL obrazka zamiast entity_picture.',
@@ -508,8 +510,21 @@ function getHassLanguage(hass) {
         || hass?.config?.language
         || (typeof navigator !== 'undefined' ? navigator.language : 'en'));
 }
-function getBrowserLanguage() {
-    return normalizeLanguage(typeof navigator !== 'undefined' ? navigator.language : 'en');
+function getEditorLanguage() {
+    const documentLanguage = typeof document !== 'undefined'
+        ? document.documentElement?.lang
+        : '';
+    const hassLanguage = typeof document !== 'undefined'
+        ? document.querySelector('home-assistant')?.hass?.language
+            || document.querySelector('hc-main')?.hass?.language
+        : '';
+    const browserLanguages = typeof navigator !== 'undefined'
+        ? navigator.languages?.find(Boolean)
+        : '';
+    return normalizeLanguage(hassLanguage
+        || documentLanguage
+        || browserLanguages
+        || (typeof navigator !== 'undefined' ? navigator.language : 'en'));
 }
 function getTranslations(language) {
     return dictionaries[language] || dictionaries.en;
@@ -648,9 +663,27 @@ function colorWithAlpha(color, alpha) {
     }
     return color;
 }
+function getPlaceDialLabel(place) {
+    return place.short_label || place.label;
+}
+function getPlaceLabelFontSize(place) {
+    const label = getPlaceDialLabel(place);
+    const length = Array.from(label).length;
+    if (length >= 26) {
+        return '1.7px';
+    }
+    if (length >= 20) {
+        return '2.05px';
+    }
+    if (length >= 15) {
+        return '2.45px';
+    }
+    return '3.1px';
+}
 class ZSWizardClockCard extends i$2 {
     static getStubConfig() {
-        const t = getTranslations(getBrowserLanguage());
+        const editorLanguage = getEditorLanguage();
+        const t = getTranslations(editorLanguage);
         return {
             type: `custom:${CARD_TAG}`,
             title: t.defaultTitle,
@@ -667,7 +700,7 @@ class ZSWizardClockCard extends i$2 {
             places: [
                 {
                     id: 'home',
-                    label: getBrowserLanguage() === 'pl' ? 'W domu' : 'At Home',
+                    label: editorLanguage === 'pl' ? 'W domu' : 'At Home',
                     zone_entities: ['zone.home'],
                     match: {
                         states: ['home'],
@@ -676,7 +709,7 @@ class ZSWizardClockCard extends i$2 {
                 },
                 {
                     id: 'travelling',
-                    label: getBrowserLanguage() === 'pl' ? 'W podrozy' : 'Travelling',
+                    label: editorLanguage === 'pl' ? 'W podrozy' : 'Travelling',
                     kind: 'transient',
                     priority: 80,
                     match: {
@@ -687,7 +720,7 @@ class ZSWizardClockCard extends i$2 {
                 },
                 {
                     id: 'unknown',
-                    label: getBrowserLanguage() === 'pl' ? 'Nieznane' : 'Unknown',
+                    label: editorLanguage === 'pl' ? 'Nieznane' : 'Unknown',
                     kind: 'fallback',
                 },
             ],
@@ -700,7 +733,7 @@ class ZSWizardClockCard extends i$2 {
         };
     }
     static getConfigForm() {
-        const t = getTranslations(getBrowserLanguage());
+        const t = getTranslations(getEditorLanguage());
         return {
             schema: [
                 { name: 'title', selector: { text: {} } },
@@ -1188,9 +1221,17 @@ class ZSWizardClockCard extends i$2 {
             <text
               class="place-label"
               fill=${place.label_color || 'color-mix(in srgb, var(--zs-clock-rim) 80%, black)'}
+              font-size=${getPlaceLabelFontSize(place)}
+              lengthAdjust="spacingAndGlyphs"
             >
-              <textPath href="#place-arc-${index}" startOffset="50%" text-anchor="middle">
-                ${place.short_label || place.label}
+              <textPath
+                href="#place-arc-${index}"
+                startOffset="50%"
+                text-anchor="middle"
+                textLength="18"
+                lengthAdjust="spacingAndGlyphs"
+              >
+                ${getPlaceDialLabel(place)}
               </textPath>
             </text>
           `;
@@ -1490,7 +1531,6 @@ ZSWizardClockCard.styles = i$5 `
 
     .place-label {
       font-family: var(--zs-clock-title);
-      font-size: 3.1px;
       letter-spacing: 0.08em;
       fill: color-mix(in srgb, var(--zs-clock-rim) 80%, black);
       text-transform: uppercase;

@@ -10,7 +10,7 @@ import {
   normalizeList,
   validateConfig,
 } from './core';
-import { getBrowserLanguage, getHassLanguage, getTranslations } from './i18n';
+import { getEditorLanguage, getHassLanguage, getTranslations } from './i18n';
 import type { CardConfig, HomeAssistant, PlaceConfig, ResolvedWizard, WizardConfig } from './types';
 
 declare global {
@@ -168,6 +168,29 @@ function colorWithAlpha(color: string, alpha: number): string {
   return color;
 }
 
+function getPlaceDialLabel(place: PlaceConfig): string {
+  return place.short_label || place.label;
+}
+
+function getPlaceLabelFontSize(place: PlaceConfig): string {
+  const label = getPlaceDialLabel(place);
+  const length = Array.from(label).length;
+
+  if (length >= 26) {
+    return '1.7px';
+  }
+
+  if (length >= 20) {
+    return '2.05px';
+  }
+
+  if (length >= 15) {
+    return '2.45px';
+  }
+
+  return '3.1px';
+}
+
 
 class ZSWizardClockCard extends LitElement {
   static properties = {
@@ -176,7 +199,8 @@ class ZSWizardClockCard extends LitElement {
   };
 
   static getStubConfig() {
-    const t = getTranslations(getBrowserLanguage());
+    const editorLanguage = getEditorLanguage();
+    const t = getTranslations(editorLanguage);
     return {
       type: `custom:${CARD_TAG}`,
       title: t.defaultTitle,
@@ -193,7 +217,7 @@ class ZSWizardClockCard extends LitElement {
       places: [
         {
           id: 'home',
-          label: getBrowserLanguage() === 'pl' ? 'W domu' : 'At Home',
+          label: editorLanguage === 'pl' ? 'W domu' : 'At Home',
           zone_entities: ['zone.home'],
           match: {
             states: ['home'],
@@ -202,7 +226,7 @@ class ZSWizardClockCard extends LitElement {
         },
         {
           id: 'travelling',
-          label: getBrowserLanguage() === 'pl' ? 'W podrozy' : 'Travelling',
+          label: editorLanguage === 'pl' ? 'W podrozy' : 'Travelling',
           kind: 'transient',
           priority: 80,
           match: {
@@ -213,7 +237,7 @@ class ZSWizardClockCard extends LitElement {
         },
         {
           id: 'unknown',
-          label: getBrowserLanguage() === 'pl' ? 'Nieznane' : 'Unknown',
+          label: editorLanguage === 'pl' ? 'Nieznane' : 'Unknown',
           kind: 'fallback',
         },
       ],
@@ -227,7 +251,7 @@ class ZSWizardClockCard extends LitElement {
   }
 
   static getConfigForm() {
-    const t = getTranslations(getBrowserLanguage());
+    const t = getTranslations(getEditorLanguage());
     return {
       schema: [
         { name: 'title', selector: { text: {} } },
@@ -531,7 +555,6 @@ class ZSWizardClockCard extends LitElement {
 
     .place-label {
       font-family: var(--zs-clock-title);
-      font-size: 3.1px;
       letter-spacing: 0.08em;
       fill: color-mix(in srgb, var(--zs-clock-rim) 80%, black);
       text-transform: uppercase;
@@ -965,9 +988,17 @@ class ZSWizardClockCard extends LitElement {
             <text
               class="place-label"
               fill=${place.label_color || 'color-mix(in srgb, var(--zs-clock-rim) 80%, black)'}
+              font-size=${getPlaceLabelFontSize(place)}
+              lengthAdjust="spacingAndGlyphs"
             >
-              <textPath href="#place-arc-${index}" startOffset="50%" text-anchor="middle">
-                ${place.short_label || place.label}
+              <textPath
+                href="#place-arc-${index}"
+                startOffset="50%"
+                text-anchor="middle"
+                textLength="18"
+                lengthAdjust="spacingAndGlyphs"
+              >
+                ${getPlaceDialLabel(place)}
               </textPath>
             </text>
           `;
