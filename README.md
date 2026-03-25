@@ -169,6 +169,17 @@ The editor now also narrows entity pickers:
 - proximity selection is limited to `sensor` and `proximity`
 - places can directly pick `zone.*` entities
 
+## Debugging
+
+If a person is shown in the wrong place, temporarily enable:
+
+```yaml
+style:
+  debug: true
+```
+
+This shows the raw `state`, `zone`, `friendlyZone`, `locality`, `speed` and the matching reason used by the card.
+
 Advanced matching is still easiest in YAML for now, but common card setup can already be done in the UI.
 
 Example:
