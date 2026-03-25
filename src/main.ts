@@ -1,133 +1,23 @@
 import { LitElement, css, html, svg } from 'lit';
 import { styleMap } from 'lit/directives/style-map.js';
+import {
+  asArray,
+  deriveWizardContext,
+  explainPlaceMatch,
+  getZoneMatchValues,
+  matchesPlace,
+  normalize,
+  normalizeList,
+  validateConfig,
+} from './core';
+import { getBrowserLanguage, getHassLanguage, getTranslations } from './i18n';
+import type { CardConfig, HomeAssistant, PlaceConfig, ResolvedWizard, WizardConfig } from './types';
 
 declare global {
   interface Window {
     customCards?: Array<Record<string, any>>;
   }
 }
-
-type HassEntity = {
-  entity_id: string;
-  state: string;
-  attributes?: Record<string, any>;
-};
-
-type HomeAssistant = {
-  states: Record<string, HassEntity>;
-  themes?: {
-    darkMode?: boolean;
-    themes?: Record<string, Record<string, string>>;
-  };
-  config?: {
-    unit_system?: {
-      length?: string;
-      temperature?: string;
-    };
-  };
-  callService?: (domain: string, service: string, data?: Record<string, any>) => void;
-};
-
-type MatchEntityCondition = {
-  entity: string;
-  attribute?: string;
-  state?: string;
-  states?: string[];
-  above?: number;
-  below?: number;
-};
-
-type PlaceMatch = {
-  states?: string[];
-  zones?: string[];
-  localities?: string[];
-  min_speed?: number;
-  max_speed?: number;
-  moving?: boolean;
-  proximity_directions?: string[];
-  unavailable?: boolean;
-  unknown?: boolean;
-  not_home?: boolean;
-  entities?: MatchEntityCondition[];
-};
-
-type PlaceConfig = {
-  id: string;
-  label: string;
-  short_label?: string;
-  kind?: 'place' | 'transient' | 'alert' | 'fallback';
-  priority?: number;
-  color?: string;
-  label_color?: string;
-  icon?: string;
-  zone_entities?: string[];
-  match?: PlaceMatch;
-};
-
-type WizardConfig = {
-  entity: string;
-  name?: string;
-  color?: string;
-  text_color?: string;
-  ring_color?: string;
-  avatar?: string;
-  show_avatar?: boolean;
-  proximity_entity?: string;
-};
-
-type CardConfig = {
-  type: string;
-  title?: string;
-  subtitle?: string;
-  default_place?: string;
-  places: PlaceConfig[];
-  wizards: WizardConfig[];
-  style?: {
-    preset?: 'brass' | 'parchment' | 'ministry';
-    ha_theme?: string;
-    accent_color?: string;
-    background?: string;
-    text_color?: string;
-    inner_glow?: boolean;
-    danger_glow?: boolean;
-    show_legend?: boolean;
-    show_center_panel?: boolean;
-    show_place_sectors?: boolean;
-    sector_opacity?: number;
-    show_ornaments?: boolean;
-    debug?: boolean;
-  };
-};
-
-type ResolvedWizard = {
-  name: string;
-  initials: string;
-  color: string;
-  textColor: string;
-  ringColor: string;
-  entityId: string;
-  place: PlaceConfig;
-  angle: number;
-  placeIndex: number;
-  avatar?: string;
-  entity?: HassEntity;
-  debug?: WizardContext & {
-    matchedBy: string[];
-  };
-};
-
-type WizardContext = {
-  state: string;
-  zone: string;
-  locality: string;
-  friendlyZone: string;
-  speed: number;
-  moving: boolean;
-  proximity: string;
-  unavailable: boolean;
-  unknown: boolean;
-  notHome: boolean;
-};
 
 const CARD_TAG = 'zs-wizard-clock-card';
 
@@ -204,45 +94,6 @@ function mergeConfig(config: CardConfig): CardConfig {
   };
 }
 
-function normalize(value: any): string {
-  return String(value ?? '').trim().toLowerCase();
-}
-
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (value === undefined) {
-    return [];
-  }
-
-  return Array.isArray(value) ? value : [value];
-}
-
-function normalizeList(value: any): string[] {
-  if (value === undefined || value === null || value === '') {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .flatMap((entry) => normalizeList(entry))
-      .filter(Boolean);
-  }
-
-  if (typeof value === 'string') {
-    return value
-      .split(',')
-      .map((entry) => normalize(entry))
-      .filter(Boolean);
-  }
-
-  if (typeof value === 'object') {
-    return Object.values(value)
-      .flatMap((entry) => normalizeList(entry))
-      .filter(Boolean);
-  }
-
-  return [normalize(value)].filter(Boolean);
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -317,250 +168,6 @@ function colorWithAlpha(color: string, alpha: number): string {
   return color;
 }
 
-function getEntityObjectId(entityId: string): string {
-  return String(entityId || '').split('.').slice(1).join('.') || String(entityId || '');
-}
-
-function getZoneMatchValues(place: PlaceConfig, hass: HomeAssistant): string[] {
-  const values = new Set<string>();
-
-  for (const zoneEntityId of asArray(place.zone_entities)) {
-    const zoneEntity = hass.states?.[zoneEntityId];
-    const objectId = getEntityObjectId(zoneEntityId);
-
-    if (objectId) {
-      values.add(normalize(objectId));
-    }
-
-    if (zoneEntity?.attributes?.friendly_name) {
-      values.add(normalize(zoneEntity.attributes.friendly_name));
-    }
-
-    if (zoneEntity?.state) {
-      values.add(normalize(zoneEntity.state));
-    }
-  }
-
-  return [...values];
-}
-
-function getEntityAttribute(entity: HassEntity | undefined, attribute?: string): any {
-  if (!entity) {
-    return undefined;
-  }
-
-  if (!attribute || attribute === 'state') {
-    return entity.state;
-  }
-
-  return entity.attributes?.[attribute];
-}
-
-function evaluateEntityCondition(condition: MatchEntityCondition, hass: HomeAssistant): boolean {
-  const entity = hass.states?.[condition.entity];
-  const rawValue = getEntityAttribute(entity, condition.attribute);
-
-  if (condition.state !== undefined) {
-    return String(rawValue) === String(condition.state);
-  }
-
-  if (condition.states?.length) {
-    return normalizeList(condition.states).includes(normalize(rawValue));
-  }
-
-  if (condition.above !== undefined) {
-    return Number(rawValue) > Number(condition.above);
-  }
-
-  if (condition.below !== undefined) {
-    return Number(rawValue) < Number(condition.below);
-  }
-
-  return !!rawValue;
-}
-
-function deriveWizardContext(entity: HassEntity | undefined, proximityEntity: HassEntity | undefined): WizardContext {
-  if (!entity) {
-    return {
-      state: 'unavailable',
-      zone: '',
-      locality: '',
-      friendlyZone: '',
-      speed: 0,
-      moving: false,
-      proximity: '',
-      unavailable: true,
-      unknown: false,
-      notHome: true,
-    };
-  }
-
-  const state = String(entity.state ?? '');
-  const attributes = entity.attributes || {};
-  const zone = String(attributes.zone ?? state ?? '');
-  const friendlyZone = String(attributes.friendly_name ?? '');
-  const locality = String(attributes.locality ?? attributes.city ?? '');
-  const speed = Number(attributes.velocity ?? attributes.speed ?? 0);
-  const moving = Boolean(attributes.moving) || speed > 0;
-  const proximity = String(proximityEntity?.state ?? '');
-  const unavailable = ['unavailable'].includes(normalize(state));
-  const unknown = ['unknown'].includes(normalize(state));
-  const notHome = ['not_home', 'away'].includes(normalize(state));
-
-  return {
-    state,
-    zone,
-    locality,
-    friendlyZone,
-    speed: Number.isFinite(speed) ? speed : 0,
-    moving,
-    proximity,
-    unavailable,
-    unknown,
-    notHome,
-  };
-}
-
-function matchesPlace(place: PlaceConfig, context: WizardContext, hass: HomeAssistant): boolean {
-  const match = place.match || {};
-
-  const state = normalize(context.state);
-  const zone = normalize(context.zone);
-  const locality = normalize(context.locality);
-  const friendlyZone = normalize(context.friendlyZone);
-  const proximity = normalize(context.proximity);
-
-  const locationChecks: boolean[] = [];
-  const gatingChecks: boolean[] = [];
-
-  if (match.states?.length) {
-    locationChecks.push(normalizeList(match.states).includes(state));
-  }
-
-  if (match.zones?.length) {
-    const configuredZones = normalizeList(match.zones);
-    locationChecks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
-  }
-
-  if (asArray(place.zone_entities).length) {
-    const zoneMatches = getZoneMatchValues(place, hass);
-    locationChecks.push(
-      zoneMatches.includes(zone)
-      || zoneMatches.includes(state)
-      || zoneMatches.includes(friendlyZone),
-    );
-  }
-
-  if (match.localities?.length) {
-    locationChecks.push(normalizeList(match.localities).includes(locality));
-  }
-
-  if (match.min_speed !== undefined) {
-    gatingChecks.push(context.speed >= Number(match.min_speed));
-  }
-
-  if (match.max_speed !== undefined) {
-    gatingChecks.push(context.speed <= Number(match.max_speed));
-  }
-
-  if (match.moving !== undefined) {
-    gatingChecks.push(context.moving === Boolean(match.moving));
-  }
-
-  if (match.proximity_directions?.length) {
-    gatingChecks.push(normalizeList(match.proximity_directions).includes(proximity));
-  }
-
-  if (match.unavailable) {
-    gatingChecks.push(context.unavailable);
-  }
-
-  if (match.unknown) {
-    gatingChecks.push(context.unknown);
-  }
-
-  if (match.not_home) {
-    gatingChecks.push(context.notHome);
-  }
-
-  if (match.entities?.length) {
-    gatingChecks.push(match.entities.every((condition) => evaluateEntityCondition(condition, hass)));
-  }
-
-  const hasLocationLogic = locationChecks.length > 0;
-  const hasGatingLogic = gatingChecks.length > 0;
-  const locationMatches = hasLocationLogic ? locationChecks.some(Boolean) : true;
-  const gatingMatches = hasGatingLogic ? gatingChecks.every(Boolean) : true;
-  const hasAnyLogic = hasLocationLogic || hasGatingLogic;
-
-  return hasAnyLogic && locationMatches && gatingMatches;
-}
-
-function explainPlaceMatch(place: PlaceConfig, context: WizardContext, hass: HomeAssistant): string[] {
-  const reasons: string[] = [];
-  const match = place.match || {};
-  const state = normalize(context.state);
-  const zone = normalize(context.zone);
-  const locality = normalize(context.locality);
-  const friendlyZone = normalize(context.friendlyZone);
-  const proximity = normalize(context.proximity);
-
-  if (match.states?.length && normalizeList(match.states).includes(state)) {
-    reasons.push(`state:${state}`);
-  }
-
-  if (match.zones?.length) {
-    const configuredZones = normalizeList(match.zones);
-    if (configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone)) {
-      reasons.push(`zone:${zone || state || friendlyZone}`);
-    }
-  }
-
-  if (asArray(place.zone_entities).length) {
-    const zoneMatches = getZoneMatchValues(place, hass);
-    if (zoneMatches.includes(zone) || zoneMatches.includes(state) || zoneMatches.includes(friendlyZone)) {
-      reasons.push(`zone_entity:${zone || state || friendlyZone}`);
-    }
-  }
-
-  if (match.localities?.length && normalizeList(match.localities).includes(locality)) {
-    reasons.push(`locality:${locality}`);
-  }
-
-  if (match.min_speed !== undefined && context.speed >= Number(match.min_speed)) {
-    reasons.push(`min_speed:${context.speed}`);
-  }
-
-  if (match.max_speed !== undefined && context.speed <= Number(match.max_speed)) {
-    reasons.push(`max_speed:${context.speed}`);
-  }
-
-  if (match.moving !== undefined && context.moving === Boolean(match.moving)) {
-    reasons.push(`moving:${context.moving}`);
-  }
-
-  if (match.proximity_directions?.length && normalizeList(match.proximity_directions).includes(proximity)) {
-    reasons.push(`proximity:${proximity}`);
-  }
-
-  if (match.unavailable && context.unavailable) {
-    reasons.push('unavailable');
-  }
-
-  if (match.unknown && context.unknown) {
-    reasons.push('unknown');
-  }
-
-  if (match.not_home && context.notHome) {
-    reasons.push('not_home');
-  }
-
-  if (match.entities?.length && match.entities.every((condition) => evaluateEntityCondition(condition, hass))) {
-    reasons.push('entities');
-  }
-
-  return reasons;
-}
 
 class ZSWizardClockCard extends LitElement {
   static properties = {
@@ -569,9 +176,10 @@ class ZSWizardClockCard extends LitElement {
   };
 
   static getStubConfig() {
+    const t = getTranslations(getBrowserLanguage());
     return {
       type: `custom:${CARD_TAG}`,
-      title: 'Family Clock',
+      title: t.defaultTitle,
       subtitle: 'The Burrow',
       default_place: 'unknown',
       style: {
@@ -585,7 +193,7 @@ class ZSWizardClockCard extends LitElement {
       places: [
         {
           id: 'home',
-          label: 'W domu',
+          label: getBrowserLanguage() === 'pl' ? 'W domu' : 'At Home',
           zone_entities: ['zone.home'],
           match: {
             states: ['home'],
@@ -594,17 +202,18 @@ class ZSWizardClockCard extends LitElement {
         },
         {
           id: 'travelling',
-          label: 'W podróży',
+          label: getBrowserLanguage() === 'pl' ? 'W podrozy' : 'Travelling',
           kind: 'transient',
           priority: 80,
           match: {
             moving: true,
             min_speed: 8,
+            proximity_directions: ['towards', 'away_from'],
           },
         },
         {
           id: 'unknown',
-          label: 'Nieznane',
+          label: getBrowserLanguage() === 'pl' ? 'Nieznane' : 'Unknown',
           kind: 'fallback',
         },
       ],
@@ -618,6 +227,7 @@ class ZSWizardClockCard extends LitElement {
   }
 
   static getConfigForm() {
+    const t = getTranslations(getBrowserLanguage());
     return {
       schema: [
         { name: 'title', selector: { text: {} } },
@@ -693,6 +303,8 @@ class ZSWizardClockCard extends LitElement {
                   },
                 },
                 color: { selector: { text: {} } },
+                label_color: { selector: { text: {} } },
+                icon: { selector: { icon: {} } },
                 zone_entities: {
                   selector: {
                     entity: {
@@ -721,9 +333,47 @@ class ZSWizardClockCard extends LitElement {
                           },
                         },
                         moving: { selector: { boolean: {} } },
+                        proximity_directions: {
+                          selector: {
+                            select: {
+                              multiple: true,
+                              mode: 'list',
+                              options: [
+                                { value: 'towards', label: 'towards' },
+                                { value: 'away_from', label: 'away_from' },
+                                { value: 'stationary', label: 'stationary' },
+                              ],
+                            },
+                          },
+                        },
                         unavailable: { selector: { boolean: {} } },
                         unknown: { selector: { boolean: {} } },
                         not_home: { selector: { boolean: {} } },
+                        entities: {
+                          selector: {
+                            object: {
+                              multiple: true,
+                              label_field: 'entity',
+                              description_field: 'attribute',
+                              fields: {
+                                entity: { required: true, selector: { entity: {} } },
+                                attribute: { selector: { text: {} } },
+                                state: { selector: { text: {} } },
+                                states: { selector: { text: { multiple: true } } },
+                                above: {
+                                  selector: {
+                                    number: { min: -999999, max: 999999, step: 1, mode: 'box' },
+                                  },
+                                },
+                                below: {
+                                  selector: {
+                                    number: { min: -999999, max: 999999, step: 1, mode: 'box' },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
                       },
                     },
                   },
@@ -774,69 +424,10 @@ class ZSWizardClockCard extends LitElement {
         },
       ],
       computeLabel: (schema: { name: string }) => {
-        const labels: Record<string, string> = {
-          title: 'Title',
-          subtitle: 'Subtitle',
-          default_place: 'Default place',
-          preset: 'Preset',
-          ha_theme: 'Home Assistant theme',
-          accent_color: 'Accent color',
-          background: 'Background',
-          text_color: 'Text color',
-          inner_glow: 'Inner glow',
-          danger_glow: 'Danger glow',
-          show_legend: 'Show legend',
-          show_center_panel: 'Show center panel',
-          show_place_sectors: 'Show place sectors',
-          show_ornaments: 'Show ornaments',
-          debug: 'Debug mode',
-          sector_opacity: 'Sector opacity',
-          places: 'Places',
-          wizards: 'Wizards',
-          id: 'ID',
-          label: 'Label',
-          short_label: 'Short label',
-          kind: 'Kind',
-          priority: 'Priority',
-          color: 'Color',
-          zone_entities: 'Zone entities',
-          match: 'Match rules',
-          states: 'States',
-          zones: 'Zones',
-          localities: 'Localities',
-          min_speed: 'Min speed',
-          max_speed: 'Max speed',
-          moving: 'Moving',
-          unavailable: 'Unavailable',
-          unknown: 'Unknown',
-          not_home: 'Not home',
-          entity: 'Entity',
-          name: 'Name',
-          ring_color: 'Ring color',
-          avatar: 'Avatar URL',
-          show_avatar: 'Use entity picture',
-          proximity_entity: 'Proximity entity',
-        };
-
-        return labels[schema.name] || schema.name;
+        return t.labels[schema.name] || schema.name;
       },
       computeHelper: (schema: { name: string }) => {
-        const helpers: Record<string, string> = {
-          default_place: 'Fallback place ID used when no matching rule is found.',
-          show_place_sectors: 'Shows subtle colored sectors behind place labels on the dial.',
-          show_ornaments: 'Shows decorative rim details around the clock face.',
-          debug: 'Shows raw state and matching details below the card.',
-          sector_opacity: 'Controls how visible the sectors are when enabled.',
-          places: 'Define locations shown around the dial and how they match entity states.',
-          zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
-          wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
-          match: 'Basic rule editor for common matching cases. Advanced YAML fields still work.',
-          avatar: 'Optional image URL used instead of entity_picture.',
-          show_avatar: 'If enabled, uses entity_picture when available.',
-          proximity_entity: 'Optional sensor or proximity entity used to detect motion direction.',
-        };
-
-        return helpers[schema.name];
+        return t.helpers[schema.name];
       },
     };
   }
@@ -1059,15 +650,15 @@ class ZSWizardClockCard extends LitElement {
   `;
 
   setConfig(config: CardConfig) {
-    if (!config?.places?.length) {
-      throw new Error('Specify at least one place in `places`.');
+    const mergedConfig = mergeConfig(config);
+    const issues = validateConfig(mergedConfig);
+    const errors = issues.filter((issue) => issue.severity === 'error');
+
+    if (errors.length) {
+      throw new Error(errors.map((issue) => `${issue.path}: ${issue.message}`).join(' '));
     }
 
-    if (!config?.wizards?.length) {
-      throw new Error('Specify at least one wizard in `wizards`.');
-    }
-
-    this.config = mergeConfig(config);
+    this.config = mergedConfig;
   }
 
   getCardSize() {
@@ -1085,6 +676,10 @@ class ZSWizardClockCard extends LitElement {
 
   get isDarkMode(): boolean {
     return Boolean(this.hass?.themes?.darkMode);
+  }
+
+  get t() {
+    return getTranslations(getHassLanguage(this.hass));
   }
 
   get selectedPreset() {
@@ -1367,7 +962,10 @@ class ZSWizardClockCard extends LitElement {
               stroke="color-mix(in srgb, var(--zs-clock-rim) 60%, transparent)"
               stroke-width="0.5"
             ></line>
-            <text class="place-label">
+            <text
+              class="place-label"
+              fill=${place.label_color || 'color-mix(in srgb, var(--zs-clock-rim) 80%, black)'}
+            >
               <textPath href="#place-arc-${index}" startOffset="50%" text-anchor="middle">
                 ${place.short_label || place.label}
               </textPath>
@@ -1396,7 +994,7 @@ class ZSWizardClockCard extends LitElement {
               font-size="2.5"
               fill=${this.fallbackTextColor}
             >
-              ${this.summaryPlace?.short_label || this.summaryPlace?.label || 'Clock'}
+              ${this.summaryPlace?.short_label || this.summaryPlace?.label || this.t.defaultTitle}
             </text>
             <text
               x="50"
@@ -1406,7 +1004,7 @@ class ZSWizardClockCard extends LitElement {
               font-size="1.95"
               fill="var(--zs-clock-muted)"
             >
-              ${this.resolvedWizards.length} tracked
+              ${this.t.tracked(this.resolvedWizards.length)}
             </text>
             <text
               x="50"
@@ -1416,7 +1014,7 @@ class ZSWizardClockCard extends LitElement {
               font-size="1.75"
               fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-muted)'}
             >
-              ${this.alertCount ? `${this.alertCount} alert` : 'all watched'}
+              ${this.alertCount ? this.t.alert(this.alertCount) : this.t.allWatched}
             </text>
           </g>
         `}
@@ -1497,7 +1095,7 @@ class ZSWizardClockCard extends LitElement {
           <button
             class="legend-item"
             @click=${() => this.openMoreInfo(wizard.entityId)}
-            title=${`Open ${wizard.name}`}
+            title=${this.t.openWizard(wizard.name)}
           >
             <div
               class="legend-seal"
@@ -1529,15 +1127,15 @@ class ZSWizardClockCard extends LitElement {
         ${this.resolvedWizards.map((wizard) => html`
           <div class="debug-item">
             <div><strong>${wizard.name}</strong> -> ${wizard.place.label}</div>
-            <div>entity: ${wizard.entityId}</div>
-            <div>state: ${wizard.debug?.state || '-'}</div>
-            <div>zone: ${wizard.debug?.zone || '-'}</div>
-            <div>friendlyZone: ${wizard.debug?.friendlyZone || '-'}</div>
-            <div>locality: ${wizard.debug?.locality || '-'}</div>
-            <div>speed: ${wizard.debug?.speed ?? '-'}</div>
-            <div>moving: ${String(wizard.debug?.moving ?? false)}</div>
-            <div>proximity: ${wizard.debug?.proximity || '-'}</div>
-            <div>matchedBy: ${wizard.debug?.matchedBy?.length ? wizard.debug.matchedBy.join(', ') : 'none'}</div>
+            <div>${this.t.debugFields.entity}: ${wizard.entityId}</div>
+            <div>${this.t.debugFields.state}: ${wizard.debug?.state || '-'}</div>
+            <div>${this.t.debugFields.zone}: ${wizard.debug?.zone || '-'}</div>
+            <div>${this.t.debugFields.friendlyZone}: ${wizard.debug?.friendlyZone || '-'}</div>
+            <div>${this.t.debugFields.locality}: ${wizard.debug?.locality || '-'}</div>
+            <div>${this.t.debugFields.speed}: ${wizard.debug?.speed ?? '-'}</div>
+            <div>${this.t.debugFields.moving}: ${String(wizard.debug?.moving ?? false)}</div>
+            <div>${this.t.debugFields.proximity}: ${wizard.debug?.proximity || '-'}</div>
+            <div>${this.t.debugFields.matchedBy}: ${wizard.debug?.matchedBy?.length ? wizard.debug.matchedBy.join(', ') : this.t.debugMatchedNone}</div>
           </div>
         `)}
       </div>
@@ -1548,7 +1146,7 @@ class ZSWizardClockCard extends LitElement {
     return html`
       <ha-card>
         <div class="shell">
-          <div class="empty">Karta wymaga poprawnej konfiguracji miejsc i osób.</div>
+          <div class="empty">${this.t.emptyConfig}</div>
         </div>
       </ha-card>
     `;
@@ -1564,8 +1162,8 @@ class ZSWizardClockCard extends LitElement {
         <div class="backdrop"></div>
         <div class="shell">
           <div class="header">
-            <div class="eyebrow">Wizard Presence</div>
-            <div class="title">${this.config.title || 'Wizard Clock'}</div>
+            <div class="eyebrow">${this.t.eyebrow}</div>
+            <div class="title">${this.config.title || this.t.defaultTitle}</div>
             ${this.config.subtitle ? html`<div class="subtitle">${this.config.subtitle}</div>` : ''}
           </div>
           <div class="clock-wrap">

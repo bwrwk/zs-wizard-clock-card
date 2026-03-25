@@ -37,6 +37,484 @@ const t={ATTRIBUTE:1},e=t=>(...e)=>({_$litDirective$:t,values:e});let i$1 = clas
  * SPDX-License-Identifier: BSD-3-Clause
  */const n="important",i=" !"+n,o=e(class extends i$1{constructor(t$1){if(super(t$1),t$1.type!==t.ATTRIBUTE||"style"!==t$1.name||t$1.strings?.length>2)throw Error("The `styleMap` directive must be used in the `style` attribute and must be the only part in the attribute.")}render(t){return Object.keys(t).reduce((e,r)=>{const s=t[r];return null==s?e:e+`${r=r.includes("-")?r:r.replace(/(?:^(webkit|moz|ms|o)|)(?=[A-Z])/g,"-$&").toLowerCase()}:${s};`},"")}update(e,[r]){const{style:s}=e.element;if(void 0===this.ft)return this.ft=new Set(Object.keys(r)),this.render(r);for(const t of this.ft)null==r[t]&&(this.ft.delete(t),t.includes("-")?s.removeProperty(t):s[t]=null);for(const t in r){const e=r[t];if(null!=e){this.ft.add(t);const r="string"==typeof e&&e.endsWith(i);t.includes("-")||r?s.setProperty(t,r?e.slice(0,-11):e,r?n:""):s[t]=e;}}return E}});
 
+function normalize(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+function asArray(value) {
+    if (value === undefined) {
+        return [];
+    }
+    return Array.isArray(value) ? value : [value];
+}
+function normalizeList(value) {
+    if (value === undefined || value === null || value === '') {
+        return [];
+    }
+    if (Array.isArray(value)) {
+        return value.flatMap((entry) => normalizeList(entry)).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value.split(',').map((entry) => normalize(entry)).filter(Boolean);
+    }
+    if (typeof value === 'object') {
+        return Object.values(value).flatMap((entry) => normalizeList(entry)).filter(Boolean);
+    }
+    return [normalize(value)].filter(Boolean);
+}
+function getEntityObjectId(entityId) {
+    return String(entityId || '').split('.').slice(1).join('.') || String(entityId || '');
+}
+function getEntityAttribute(entity, attribute) {
+    if (!entity) {
+        return undefined;
+    }
+    if (!attribute || attribute === 'state') {
+        return entity.state;
+    }
+    return entity.attributes?.[attribute];
+}
+function getZoneMatchValues(place, hass) {
+    const values = new Set();
+    for (const zoneEntityId of asArray(place.zone_entities)) {
+        const zoneEntity = hass.states?.[zoneEntityId];
+        const objectId = getEntityObjectId(zoneEntityId);
+        if (objectId) {
+            values.add(normalize(objectId));
+        }
+        if (zoneEntity?.attributes?.friendly_name) {
+            values.add(normalize(zoneEntity.attributes.friendly_name));
+        }
+        if (zoneEntity?.state) {
+            values.add(normalize(zoneEntity.state));
+        }
+    }
+    return [...values];
+}
+function evaluateEntityCondition(condition, hass) {
+    const entity = hass.states?.[condition.entity];
+    const rawValue = getEntityAttribute(entity, condition.attribute);
+    if (condition.state !== undefined) {
+        return String(rawValue) === String(condition.state);
+    }
+    if (condition.states?.length) {
+        return normalizeList(condition.states).includes(normalize(rawValue));
+    }
+    if (condition.above !== undefined) {
+        return Number(rawValue) > Number(condition.above);
+    }
+    if (condition.below !== undefined) {
+        return Number(rawValue) < Number(condition.below);
+    }
+    return !!rawValue;
+}
+function deriveWizardContext(entity, proximityEntity) {
+    if (!entity) {
+        return {
+            state: 'unavailable',
+            zone: '',
+            locality: '',
+            friendlyZone: '',
+            speed: 0,
+            moving: false,
+            proximity: '',
+            unavailable: true,
+            unknown: false,
+            notHome: true,
+        };
+    }
+    const state = String(entity.state ?? '');
+    const attributes = entity.attributes || {};
+    const zone = String(attributes.zone ?? state ?? '');
+    const friendlyZone = String(attributes.friendly_name ?? '');
+    const locality = String(attributes.locality ?? attributes.city ?? '');
+    const speed = Number(attributes.velocity ?? attributes.speed ?? 0);
+    const moving = Boolean(attributes.moving) || speed > 0;
+    const proximity = String(proximityEntity?.state ?? '');
+    return {
+        state,
+        zone,
+        locality,
+        friendlyZone,
+        speed: Number.isFinite(speed) ? speed : 0,
+        moving,
+        proximity,
+        unavailable: normalize(state) === 'unavailable',
+        unknown: normalize(state) === 'unknown',
+        notHome: ['not_home', 'away'].includes(normalize(state)),
+    };
+}
+function matchesPlace(place, context, hass) {
+    const match = place.match || {};
+    const state = normalize(context.state);
+    const zone = normalize(context.zone);
+    const locality = normalize(context.locality);
+    const friendlyZone = normalize(context.friendlyZone);
+    const proximity = normalize(context.proximity);
+    const locationChecks = [];
+    const gatingChecks = [];
+    if (match.states?.length) {
+        locationChecks.push(normalizeList(match.states).includes(state));
+    }
+    if (match.zones?.length) {
+        const configuredZones = normalizeList(match.zones);
+        locationChecks.push(configuredZones.includes(zone)
+            || configuredZones.includes(state)
+            || configuredZones.includes(friendlyZone));
+    }
+    if (asArray(place.zone_entities).length) {
+        const zoneMatches = getZoneMatchValues(place, hass);
+        locationChecks.push(zoneMatches.includes(zone)
+            || zoneMatches.includes(state)
+            || zoneMatches.includes(friendlyZone));
+    }
+    if (match.localities?.length) {
+        locationChecks.push(normalizeList(match.localities).includes(locality));
+    }
+    if (match.min_speed !== undefined) {
+        gatingChecks.push(context.speed >= Number(match.min_speed));
+    }
+    if (match.max_speed !== undefined) {
+        gatingChecks.push(context.speed <= Number(match.max_speed));
+    }
+    if (match.moving !== undefined) {
+        gatingChecks.push(context.moving === Boolean(match.moving));
+    }
+    if (match.proximity_directions?.length) {
+        gatingChecks.push(normalizeList(match.proximity_directions).includes(proximity));
+    }
+    if (match.unavailable) {
+        gatingChecks.push(context.unavailable);
+    }
+    if (match.unknown) {
+        gatingChecks.push(context.unknown);
+    }
+    if (match.not_home) {
+        gatingChecks.push(context.notHome);
+    }
+    if (match.entities?.length) {
+        gatingChecks.push(match.entities.every((condition) => evaluateEntityCondition(condition, hass)));
+    }
+    const hasLocationLogic = locationChecks.length > 0;
+    const hasGatingLogic = gatingChecks.length > 0;
+    const hasAnyLogic = hasLocationLogic || hasGatingLogic;
+    return hasAnyLogic
+        && (hasLocationLogic ? locationChecks.some(Boolean) : true)
+        && (hasGatingLogic ? gatingChecks.every(Boolean) : true);
+}
+function explainPlaceMatch(place, context, hass) {
+    const reasons = [];
+    const match = place.match || {};
+    const state = normalize(context.state);
+    const zone = normalize(context.zone);
+    const locality = normalize(context.locality);
+    const friendlyZone = normalize(context.friendlyZone);
+    const proximity = normalize(context.proximity);
+    if (match.states?.length && normalizeList(match.states).includes(state)) {
+        reasons.push(`state:${state}`);
+    }
+    if (match.zones?.length) {
+        const configuredZones = normalizeList(match.zones);
+        if (configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone)) {
+            reasons.push(`zone:${zone || state || friendlyZone}`);
+        }
+    }
+    if (asArray(place.zone_entities).length) {
+        const zoneMatches = getZoneMatchValues(place, hass);
+        if (zoneMatches.includes(zone) || zoneMatches.includes(state) || zoneMatches.includes(friendlyZone)) {
+            reasons.push(`zone_entity:${zone || state || friendlyZone}`);
+        }
+    }
+    if (match.localities?.length && normalizeList(match.localities).includes(locality)) {
+        reasons.push(`locality:${locality}`);
+    }
+    if (match.min_speed !== undefined && context.speed >= Number(match.min_speed)) {
+        reasons.push(`min_speed:${context.speed}`);
+    }
+    if (match.max_speed !== undefined && context.speed <= Number(match.max_speed)) {
+        reasons.push(`max_speed:${context.speed}`);
+    }
+    if (match.moving !== undefined && context.moving === Boolean(match.moving)) {
+        reasons.push(`moving:${context.moving}`);
+    }
+    if (match.proximity_directions?.length && normalizeList(match.proximity_directions).includes(proximity)) {
+        reasons.push(`proximity:${proximity}`);
+    }
+    if (match.unavailable && context.unavailable) {
+        reasons.push('unavailable');
+    }
+    if (match.unknown && context.unknown) {
+        reasons.push('unknown');
+    }
+    if (match.not_home && context.notHome) {
+        reasons.push('not_home');
+    }
+    if (match.entities?.length && match.entities.every((condition) => evaluateEntityCondition(condition, hass))) {
+        reasons.push('entities');
+    }
+    return reasons;
+}
+function validateConfig(config) {
+    const issues = [];
+    const placeIds = new Set();
+    const wizardEntities = new Set();
+    if (!config.places?.length) {
+        issues.push({ path: 'places', message: 'Add at least one place.', severity: 'error' });
+    }
+    if (!config.wizards?.length) {
+        issues.push({ path: 'wizards', message: 'Add at least one wizard.', severity: 'error' });
+    }
+    for (const [index, place] of (config.places || []).entries()) {
+        if (!place.id?.trim()) {
+            issues.push({ path: `places[${index}].id`, message: 'Place ID is required.', severity: 'error' });
+        }
+        else if (placeIds.has(place.id)) {
+            issues.push({ path: `places[${index}].id`, message: `Duplicate place ID "${place.id}".`, severity: 'error' });
+        }
+        else {
+            placeIds.add(place.id);
+        }
+        if (!place.label?.trim()) {
+            issues.push({ path: `places[${index}].label`, message: 'Place label is required.', severity: 'error' });
+        }
+        const hasMatcher = !!place.match && Object.keys(place.match).length > 0;
+        const hasZoneEntities = asArray(place.zone_entities).length > 0;
+        const isFallback = place.kind === 'fallback';
+        if (!hasMatcher && !hasZoneEntities && !isFallback) {
+            issues.push({
+                path: `places[${index}]`,
+                message: `Place "${place.id}" has no match rules, zone entities, or fallback kind.`,
+                severity: 'warning',
+            });
+        }
+    }
+    for (const [index, wizard] of (config.wizards || []).entries()) {
+        if (!wizard.entity?.trim()) {
+            issues.push({ path: `wizards[${index}].entity`, message: 'Wizard entity is required.', severity: 'error' });
+        }
+        else if (wizardEntities.has(wizard.entity)) {
+            issues.push({
+                path: `wizards[${index}].entity`,
+                message: `Duplicate wizard entity "${wizard.entity}".`,
+                severity: 'error',
+            });
+        }
+        else {
+            wizardEntities.add(wizard.entity);
+        }
+    }
+    if (config.default_place && !placeIds.has(config.default_place)) {
+        issues.push({
+            path: 'default_place',
+            message: `Default place "${config.default_place}" does not exist in places.`,
+            severity: 'error',
+        });
+    }
+    if (!config.default_place && !(config.places || []).some((place) => place.kind === 'fallback')) {
+        issues.push({
+            path: 'default_place',
+            message: 'Consider setting `default_place` or adding a fallback place.',
+            severity: 'warning',
+        });
+    }
+    return issues;
+}
+
+const dictionaries = {
+    en: {
+        eyebrow: 'Wizard Presence',
+        defaultTitle: 'Wizard Clock',
+        emptyConfig: 'The card requires a valid places and wizards configuration.',
+        tracked: (count) => `${count} tracked`,
+        alert: (count) => `${count} alert`,
+        allWatched: 'all watched',
+        openWizard: (name) => `Open ${name}`,
+        debugMatchedNone: 'none',
+        debugFields: {
+            entity: 'entity',
+            state: 'state',
+            zone: 'zone',
+            friendlyZone: 'friendlyZone',
+            locality: 'locality',
+            speed: 'speed',
+            moving: 'moving',
+            proximity: 'proximity',
+            matchedBy: 'matchedBy',
+        },
+        labels: {
+            title: 'Title',
+            subtitle: 'Subtitle',
+            default_place: 'Default place',
+            preset: 'Preset',
+            ha_theme: 'Home Assistant theme',
+            accent_color: 'Accent color',
+            background: 'Background',
+            text_color: 'Text color',
+            inner_glow: 'Inner glow',
+            danger_glow: 'Danger glow',
+            show_legend: 'Show legend',
+            show_center_panel: 'Show center panel',
+            show_place_sectors: 'Show place sectors',
+            show_ornaments: 'Show ornaments',
+            debug: 'Debug mode',
+            sector_opacity: 'Sector opacity',
+            places: 'Places',
+            wizards: 'Wizards',
+            id: 'ID',
+            label: 'Label',
+            short_label: 'Short label',
+            kind: 'Kind',
+            priority: 'Priority',
+            color: 'Color',
+            label_color: 'Label color',
+            icon: 'Icon',
+            zone_entities: 'Zone entities',
+            match: 'Match rules',
+            states: 'States',
+            zones: 'Zones',
+            localities: 'Localities',
+            min_speed: 'Min speed',
+            max_speed: 'Max speed',
+            moving: 'Moving',
+            proximity_directions: 'Proximity directions',
+            unavailable: 'Unavailable',
+            unknown: 'Unknown',
+            not_home: 'Not home',
+            entities: 'Entity conditions',
+            entity: 'Entity',
+            name: 'Name',
+            ring_color: 'Ring color',
+            avatar: 'Avatar URL',
+            show_avatar: 'Use entity picture',
+            proximity_entity: 'Proximity entity',
+            attribute: 'Attribute',
+            state: 'State',
+            above: 'Above',
+            below: 'Below',
+        },
+        helpers: {
+            default_place: 'Fallback place ID used when no matching rule is found.',
+            show_place_sectors: 'Shows subtle colored sectors behind place labels on the dial.',
+            show_ornaments: 'Shows decorative rim details around the clock face.',
+            debug: 'Shows raw state and matching details below the card.',
+            sector_opacity: 'Controls how visible the sectors are when enabled.',
+            places: 'Define locations shown around the dial and how they match entity states.',
+            zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
+            wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
+            match: 'Location fields are alternatives. Movement and status fields act as extra requirements.',
+            avatar: 'Optional image URL used instead of entity_picture.',
+            show_avatar: 'If enabled, uses entity_picture when available.',
+            proximity_entity: 'Optional sensor or proximity entity used to detect motion direction.',
+            entities: 'Optional extra conditions that must also match.',
+        },
+    },
+    pl: {
+        eyebrow: 'Obecnosc Czarodziejow',
+        defaultTitle: 'Czarodziejski Zegar',
+        emptyConfig: 'Karta wymaga poprawnej konfiguracji miejsc i osob.',
+        tracked: (count) => `${count} sledzonych`,
+        alert: (count) => `${count} alarm`,
+        allWatched: 'wszyscy obserwowani',
+        openWizard: (name) => `Otworz ${name}`,
+        debugMatchedNone: 'brak',
+        debugFields: {
+            entity: 'encja',
+            state: 'stan',
+            zone: 'strefa',
+            friendlyZone: 'nazwaStrefy',
+            locality: 'lokalizacja',
+            speed: 'predkosc',
+            moving: 'ruch',
+            proximity: 'proximity',
+            matchedBy: 'dopasowanie',
+        },
+        labels: {
+            title: 'Tytul',
+            subtitle: 'Podtytul',
+            default_place: 'Miejsce domyslne',
+            preset: 'Preset',
+            ha_theme: 'Motyw Home Assistanta',
+            accent_color: 'Kolor akcentu',
+            background: 'Tlo',
+            text_color: 'Kolor tekstu',
+            inner_glow: 'Wewnetrzna poswiata',
+            danger_glow: 'Poswiata alarmu',
+            show_legend: 'Pokaz legende',
+            show_center_panel: 'Pokaz panel centralny',
+            show_place_sectors: 'Pokaz sektory miejsc',
+            show_ornaments: 'Pokaz ornamenty',
+            debug: 'Tryb debug',
+            sector_opacity: 'Przezroczystosc sektorow',
+            places: 'Miejsca',
+            wizards: 'Osoby',
+            id: 'ID',
+            label: 'Etykieta',
+            short_label: 'Krotka etykieta',
+            kind: 'Typ',
+            priority: 'Priorytet',
+            color: 'Kolor',
+            label_color: 'Kolor etykiety',
+            icon: 'Ikona',
+            zone_entities: 'Encje stref',
+            match: 'Reguly dopasowania',
+            states: 'Stany',
+            zones: 'Strefy',
+            localities: 'Lokalizacje',
+            min_speed: 'Min predkosc',
+            max_speed: 'Max predkosc',
+            moving: 'W ruchu',
+            proximity_directions: 'Kierunki proximity',
+            unavailable: 'Niedostepne',
+            unknown: 'Nieznane',
+            not_home: 'Poza domem',
+            entities: 'Warunki encji',
+            entity: 'Encja',
+            name: 'Nazwa',
+            ring_color: 'Kolor obwodki',
+            avatar: 'URL avatara',
+            show_avatar: 'Uzyj entity picture',
+            proximity_entity: 'Encja proximity',
+            attribute: 'Atrybut',
+            state: 'Stan',
+            above: 'Powyzej',
+            below: 'Ponizej',
+        },
+        helpers: {
+            default_place: 'ID miejsca zapasowego, gdy zadna regula nie pasuje.',
+            show_place_sectors: 'Pokazuje delikatne sektory miejsc na tarczy.',
+            show_ornaments: 'Pokazuje dekoracyjne detale na rancie tarczy.',
+            debug: 'Pokazuje surowy stan i szczegoly dopasowania pod karta.',
+            sector_opacity: 'Steruje widocznoscia sektorow, gdy sa wlaczone.',
+            places: 'Zdefiniuj miejsca na tarczy i sposoby ich dopasowania.',
+            zone_entities: 'Latwiejsza opcja: wybierz encje stref zamiast wpisywac nazwy recznie.',
+            wizards: 'Sledzone osoby, trackery lub kalendarze pokazywane jako wskazowki.',
+            match: 'Pola lokalizacji sa alternatywami. Pola ruchu i statusu sa dodatkowymi warunkami.',
+            avatar: 'Opcjonalny URL obrazka zamiast entity_picture.',
+            show_avatar: 'Jesli wlaczone, uzywa entity_picture gdy jest dostepne.',
+            proximity_entity: 'Opcjonalny sensor lub encja proximity do wykrywania ruchu.',
+            entities: 'Opcjonalne dodatkowe warunki, ktore tez musza pasowac.',
+        },
+    },
+};
+function normalizeLanguage(language) {
+    const normalized = String(language || '').toLowerCase();
+    if (normalized.startsWith('pl')) {
+        return 'pl';
+    }
+    return 'en';
+}
+function getHassLanguage(hass) {
+    return normalizeLanguage(hass?.language
+        || hass?.locale?.language
+        || hass?.config?.language
+        || (typeof navigator !== 'undefined' ? navigator.language : 'en'));
+}
+function getBrowserLanguage() {
+    return normalizeLanguage(typeof navigator !== 'undefined' ? navigator.language : 'en');
+}
+function getTranslations(language) {
+    return dictionaries[language] || dictionaries.en;
+}
+
 const CARD_TAG = 'zs-wizard-clock-card';
 const DEFAULT_CONFIG = {
     type: `custom:${CARD_TAG}`,
@@ -108,37 +586,6 @@ function mergeConfig(config) {
         wizards: config.wizards || [],
     };
 }
-function normalize(value) {
-    return String(value ?? '').trim().toLowerCase();
-}
-function asArray(value) {
-    if (value === undefined) {
-        return [];
-    }
-    return Array.isArray(value) ? value : [value];
-}
-function normalizeList(value) {
-    if (value === undefined || value === null || value === '') {
-        return [];
-    }
-    if (Array.isArray(value)) {
-        return value
-            .flatMap((entry) => normalizeList(entry))
-            .filter(Boolean);
-    }
-    if (typeof value === 'string') {
-        return value
-            .split(',')
-            .map((entry) => normalize(entry))
-            .filter(Boolean);
-    }
-    if (typeof value === 'object') {
-        return Object.values(value)
-            .flatMap((entry) => normalizeList(entry))
-            .filter(Boolean);
-    }
-    return [normalize(value)].filter(Boolean);
-}
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
@@ -201,204 +648,12 @@ function colorWithAlpha(color, alpha) {
     }
     return color;
 }
-function getEntityObjectId(entityId) {
-    return String(entityId || '').split('.').slice(1).join('.') || String(entityId || '');
-}
-function getZoneMatchValues(place, hass) {
-    const values = new Set();
-    for (const zoneEntityId of asArray(place.zone_entities)) {
-        const zoneEntity = hass.states?.[zoneEntityId];
-        const objectId = getEntityObjectId(zoneEntityId);
-        if (objectId) {
-            values.add(normalize(objectId));
-        }
-        if (zoneEntity?.attributes?.friendly_name) {
-            values.add(normalize(zoneEntity.attributes.friendly_name));
-        }
-        if (zoneEntity?.state) {
-            values.add(normalize(zoneEntity.state));
-        }
-    }
-    return [...values];
-}
-function getEntityAttribute(entity, attribute) {
-    if (!entity) {
-        return undefined;
-    }
-    if (!attribute || attribute === 'state') {
-        return entity.state;
-    }
-    return entity.attributes?.[attribute];
-}
-function evaluateEntityCondition(condition, hass) {
-    const entity = hass.states?.[condition.entity];
-    const rawValue = getEntityAttribute(entity, condition.attribute);
-    if (condition.state !== undefined) {
-        return String(rawValue) === String(condition.state);
-    }
-    if (condition.states?.length) {
-        return normalizeList(condition.states).includes(normalize(rawValue));
-    }
-    if (condition.above !== undefined) {
-        return Number(rawValue) > Number(condition.above);
-    }
-    if (condition.below !== undefined) {
-        return Number(rawValue) < Number(condition.below);
-    }
-    return !!rawValue;
-}
-function deriveWizardContext(entity, proximityEntity) {
-    if (!entity) {
-        return {
-            state: 'unavailable',
-            zone: '',
-            locality: '',
-            friendlyZone: '',
-            speed: 0,
-            moving: false,
-            proximity: '',
-            unavailable: true,
-            unknown: false,
-            notHome: true,
-        };
-    }
-    const state = String(entity.state ?? '');
-    const attributes = entity.attributes || {};
-    const zone = String(attributes.zone ?? state ?? '');
-    const friendlyZone = String(attributes.friendly_name ?? '');
-    const locality = String(attributes.locality ?? attributes.city ?? '');
-    const speed = Number(attributes.velocity ?? attributes.speed ?? 0);
-    const moving = Boolean(attributes.moving) || speed > 0;
-    const proximity = String(proximityEntity?.state ?? '');
-    const unavailable = ['unavailable'].includes(normalize(state));
-    const unknown = ['unknown'].includes(normalize(state));
-    const notHome = ['not_home', 'away'].includes(normalize(state));
-    return {
-        state,
-        zone,
-        locality,
-        friendlyZone,
-        speed: Number.isFinite(speed) ? speed : 0,
-        moving,
-        proximity,
-        unavailable,
-        unknown,
-        notHome,
-    };
-}
-function matchesPlace(place, context, hass) {
-    const match = place.match || {};
-    const state = normalize(context.state);
-    const zone = normalize(context.zone);
-    const locality = normalize(context.locality);
-    const friendlyZone = normalize(context.friendlyZone);
-    const proximity = normalize(context.proximity);
-    const locationChecks = [];
-    const gatingChecks = [];
-    if (match.states?.length) {
-        locationChecks.push(normalizeList(match.states).includes(state));
-    }
-    if (match.zones?.length) {
-        const configuredZones = normalizeList(match.zones);
-        locationChecks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
-    }
-    if (asArray(place.zone_entities).length) {
-        const zoneMatches = getZoneMatchValues(place, hass);
-        locationChecks.push(zoneMatches.includes(zone)
-            || zoneMatches.includes(state)
-            || zoneMatches.includes(friendlyZone));
-    }
-    if (match.localities?.length) {
-        locationChecks.push(normalizeList(match.localities).includes(locality));
-    }
-    if (match.min_speed !== undefined) {
-        gatingChecks.push(context.speed >= Number(match.min_speed));
-    }
-    if (match.max_speed !== undefined) {
-        gatingChecks.push(context.speed <= Number(match.max_speed));
-    }
-    if (match.moving !== undefined) {
-        gatingChecks.push(context.moving === Boolean(match.moving));
-    }
-    if (match.proximity_directions?.length) {
-        gatingChecks.push(normalizeList(match.proximity_directions).includes(proximity));
-    }
-    if (match.unavailable) {
-        gatingChecks.push(context.unavailable);
-    }
-    if (match.unknown) {
-        gatingChecks.push(context.unknown);
-    }
-    if (match.not_home) {
-        gatingChecks.push(context.notHome);
-    }
-    if (match.entities?.length) {
-        gatingChecks.push(match.entities.every((condition) => evaluateEntityCondition(condition, hass)));
-    }
-    const hasLocationLogic = locationChecks.length > 0;
-    const hasGatingLogic = gatingChecks.length > 0;
-    const locationMatches = hasLocationLogic ? locationChecks.some(Boolean) : true;
-    const gatingMatches = hasGatingLogic ? gatingChecks.every(Boolean) : true;
-    const hasAnyLogic = hasLocationLogic || hasGatingLogic;
-    return hasAnyLogic && locationMatches && gatingMatches;
-}
-function explainPlaceMatch(place, context, hass) {
-    const reasons = [];
-    const match = place.match || {};
-    const state = normalize(context.state);
-    const zone = normalize(context.zone);
-    const locality = normalize(context.locality);
-    const friendlyZone = normalize(context.friendlyZone);
-    const proximity = normalize(context.proximity);
-    if (match.states?.length && normalizeList(match.states).includes(state)) {
-        reasons.push(`state:${state}`);
-    }
-    if (match.zones?.length) {
-        const configuredZones = normalizeList(match.zones);
-        if (configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone)) {
-            reasons.push(`zone:${zone || state || friendlyZone}`);
-        }
-    }
-    if (asArray(place.zone_entities).length) {
-        const zoneMatches = getZoneMatchValues(place, hass);
-        if (zoneMatches.includes(zone) || zoneMatches.includes(state) || zoneMatches.includes(friendlyZone)) {
-            reasons.push(`zone_entity:${zone || state || friendlyZone}`);
-        }
-    }
-    if (match.localities?.length && normalizeList(match.localities).includes(locality)) {
-        reasons.push(`locality:${locality}`);
-    }
-    if (match.min_speed !== undefined && context.speed >= Number(match.min_speed)) {
-        reasons.push(`min_speed:${context.speed}`);
-    }
-    if (match.max_speed !== undefined && context.speed <= Number(match.max_speed)) {
-        reasons.push(`max_speed:${context.speed}`);
-    }
-    if (match.moving !== undefined && context.moving === Boolean(match.moving)) {
-        reasons.push(`moving:${context.moving}`);
-    }
-    if (match.proximity_directions?.length && normalizeList(match.proximity_directions).includes(proximity)) {
-        reasons.push(`proximity:${proximity}`);
-    }
-    if (match.unavailable && context.unavailable) {
-        reasons.push('unavailable');
-    }
-    if (match.unknown && context.unknown) {
-        reasons.push('unknown');
-    }
-    if (match.not_home && context.notHome) {
-        reasons.push('not_home');
-    }
-    if (match.entities?.length && match.entities.every((condition) => evaluateEntityCondition(condition, hass))) {
-        reasons.push('entities');
-    }
-    return reasons;
-}
 class ZSWizardClockCard extends i$2 {
     static getStubConfig() {
+        const t = getTranslations(getBrowserLanguage());
         return {
             type: `custom:${CARD_TAG}`,
-            title: 'Family Clock',
+            title: t.defaultTitle,
             subtitle: 'The Burrow',
             default_place: 'unknown',
             style: {
@@ -412,7 +667,7 @@ class ZSWizardClockCard extends i$2 {
             places: [
                 {
                     id: 'home',
-                    label: 'W domu',
+                    label: getBrowserLanguage() === 'pl' ? 'W domu' : 'At Home',
                     zone_entities: ['zone.home'],
                     match: {
                         states: ['home'],
@@ -421,17 +676,18 @@ class ZSWizardClockCard extends i$2 {
                 },
                 {
                     id: 'travelling',
-                    label: 'W podróży',
+                    label: getBrowserLanguage() === 'pl' ? 'W podrozy' : 'Travelling',
                     kind: 'transient',
                     priority: 80,
                     match: {
                         moving: true,
                         min_speed: 8,
+                        proximity_directions: ['towards', 'away_from'],
                     },
                 },
                 {
                     id: 'unknown',
-                    label: 'Nieznane',
+                    label: getBrowserLanguage() === 'pl' ? 'Nieznane' : 'Unknown',
                     kind: 'fallback',
                 },
             ],
@@ -444,6 +700,7 @@ class ZSWizardClockCard extends i$2 {
         };
     }
     static getConfigForm() {
+        const t = getTranslations(getBrowserLanguage());
         return {
             schema: [
                 { name: 'title', selector: { text: {} } },
@@ -519,6 +776,8 @@ class ZSWizardClockCard extends i$2 {
                                     },
                                 },
                                 color: { selector: { text: {} } },
+                                label_color: { selector: { text: {} } },
+                                icon: { selector: { icon: {} } },
                                 zone_entities: {
                                     selector: {
                                         entity: {
@@ -547,9 +806,47 @@ class ZSWizardClockCard extends i$2 {
                                                     },
                                                 },
                                                 moving: { selector: { boolean: {} } },
+                                                proximity_directions: {
+                                                    selector: {
+                                                        select: {
+                                                            multiple: true,
+                                                            mode: 'list',
+                                                            options: [
+                                                                { value: 'towards', label: 'towards' },
+                                                                { value: 'away_from', label: 'away_from' },
+                                                                { value: 'stationary', label: 'stationary' },
+                                                            ],
+                                                        },
+                                                    },
+                                                },
                                                 unavailable: { selector: { boolean: {} } },
                                                 unknown: { selector: { boolean: {} } },
                                                 not_home: { selector: { boolean: {} } },
+                                                entities: {
+                                                    selector: {
+                                                        object: {
+                                                            multiple: true,
+                                                            label_field: 'entity',
+                                                            description_field: 'attribute',
+                                                            fields: {
+                                                                entity: { required: true, selector: { entity: {} } },
+                                                                attribute: { selector: { text: {} } },
+                                                                state: { selector: { text: {} } },
+                                                                states: { selector: { text: { multiple: true } } },
+                                                                above: {
+                                                                    selector: {
+                                                                        number: { min: -999999, max: 999999, step: 1, mode: 'box' },
+                                                                    },
+                                                                },
+                                                                below: {
+                                                                    selector: {
+                                                                        number: { min: -999999, max: 999999, step: 1, mode: 'box' },
+                                                                    },
+                                                                },
+                                                            },
+                                                        },
+                                                    },
+                                                },
                                             },
                                         },
                                     },
@@ -600,78 +897,21 @@ class ZSWizardClockCard extends i$2 {
                 },
             ],
             computeLabel: (schema) => {
-                const labels = {
-                    title: 'Title',
-                    subtitle: 'Subtitle',
-                    default_place: 'Default place',
-                    preset: 'Preset',
-                    ha_theme: 'Home Assistant theme',
-                    accent_color: 'Accent color',
-                    background: 'Background',
-                    text_color: 'Text color',
-                    inner_glow: 'Inner glow',
-                    danger_glow: 'Danger glow',
-                    show_legend: 'Show legend',
-                    show_center_panel: 'Show center panel',
-                    show_place_sectors: 'Show place sectors',
-                    show_ornaments: 'Show ornaments',
-                    debug: 'Debug mode',
-                    sector_opacity: 'Sector opacity',
-                    places: 'Places',
-                    wizards: 'Wizards',
-                    id: 'ID',
-                    label: 'Label',
-                    short_label: 'Short label',
-                    kind: 'Kind',
-                    priority: 'Priority',
-                    color: 'Color',
-                    zone_entities: 'Zone entities',
-                    match: 'Match rules',
-                    states: 'States',
-                    zones: 'Zones',
-                    localities: 'Localities',
-                    min_speed: 'Min speed',
-                    max_speed: 'Max speed',
-                    moving: 'Moving',
-                    unavailable: 'Unavailable',
-                    unknown: 'Unknown',
-                    not_home: 'Not home',
-                    entity: 'Entity',
-                    name: 'Name',
-                    ring_color: 'Ring color',
-                    avatar: 'Avatar URL',
-                    show_avatar: 'Use entity picture',
-                    proximity_entity: 'Proximity entity',
-                };
-                return labels[schema.name] || schema.name;
+                return t.labels[schema.name] || schema.name;
             },
             computeHelper: (schema) => {
-                const helpers = {
-                    default_place: 'Fallback place ID used when no matching rule is found.',
-                    show_place_sectors: 'Shows subtle colored sectors behind place labels on the dial.',
-                    show_ornaments: 'Shows decorative rim details around the clock face.',
-                    debug: 'Shows raw state and matching details below the card.',
-                    sector_opacity: 'Controls how visible the sectors are when enabled.',
-                    places: 'Define locations shown around the dial and how they match entity states.',
-                    zone_entities: 'Easy mode: pick one or more zone entities instead of typing zone names manually.',
-                    wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
-                    match: 'Basic rule editor for common matching cases. Advanced YAML fields still work.',
-                    avatar: 'Optional image URL used instead of entity_picture.',
-                    show_avatar: 'If enabled, uses entity_picture when available.',
-                    proximity_entity: 'Optional sensor or proximity entity used to detect motion direction.',
-                };
-                return helpers[schema.name];
+                return t.helpers[schema.name];
             },
         };
     }
     setConfig(config) {
-        if (!config?.places?.length) {
-            throw new Error('Specify at least one place in `places`.');
+        const mergedConfig = mergeConfig(config);
+        const issues = validateConfig(mergedConfig);
+        const errors = issues.filter((issue) => issue.severity === 'error');
+        if (errors.length) {
+            throw new Error(errors.map((issue) => `${issue.path}: ${issue.message}`).join(' '));
         }
-        if (!config?.wizards?.length) {
-            throw new Error('Specify at least one wizard in `wizards`.');
-        }
-        this.config = mergeConfig(config);
+        this.config = mergedConfig;
     }
     getCardSize() {
         return 8;
@@ -686,6 +926,9 @@ class ZSWizardClockCard extends i$2 {
     }
     get isDarkMode() {
         return Boolean(this.hass?.themes?.darkMode);
+    }
+    get t() {
+        return getTranslations(getHassLanguage(this.hass));
     }
     get selectedPreset() {
         return PRESET_STYLES[this.config.style?.preset || 'brass'] || PRESET_STYLES.brass;
@@ -942,7 +1185,10 @@ class ZSWizardClockCard extends i$2 {
               stroke="color-mix(in srgb, var(--zs-clock-rim) 60%, transparent)"
               stroke-width="0.5"
             ></line>
-            <text class="place-label">
+            <text
+              class="place-label"
+              fill=${place.label_color || 'color-mix(in srgb, var(--zs-clock-rim) 80%, black)'}
+            >
               <textPath href="#place-arc-${index}" startOffset="50%" text-anchor="middle">
                 ${place.short_label || place.label}
               </textPath>
@@ -971,7 +1217,7 @@ class ZSWizardClockCard extends i$2 {
               font-size="2.5"
               fill=${this.fallbackTextColor}
             >
-              ${this.summaryPlace?.short_label || this.summaryPlace?.label || 'Clock'}
+              ${this.summaryPlace?.short_label || this.summaryPlace?.label || this.t.defaultTitle}
             </text>
             <text
               x="50"
@@ -981,7 +1227,7 @@ class ZSWizardClockCard extends i$2 {
               font-size="1.95"
               fill="var(--zs-clock-muted)"
             >
-              ${this.resolvedWizards.length} tracked
+              ${this.t.tracked(this.resolvedWizards.length)}
             </text>
             <text
               x="50"
@@ -991,7 +1237,7 @@ class ZSWizardClockCard extends i$2 {
               font-size="1.75"
               fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-muted)'}
             >
-              ${this.alertCount ? `${this.alertCount} alert` : 'all watched'}
+              ${this.alertCount ? this.t.alert(this.alertCount) : this.t.allWatched}
             </text>
           </g>
         `}
@@ -1068,7 +1314,7 @@ class ZSWizardClockCard extends i$2 {
           <button
             class="legend-item"
             @click=${() => this.openMoreInfo(wizard.entityId)}
-            title=${`Open ${wizard.name}`}
+            title=${this.t.openWizard(wizard.name)}
           >
             <div
               class="legend-seal"
@@ -1098,15 +1344,15 @@ class ZSWizardClockCard extends i$2 {
         ${this.resolvedWizards.map((wizard) => b `
           <div class="debug-item">
             <div><strong>${wizard.name}</strong> -> ${wizard.place.label}</div>
-            <div>entity: ${wizard.entityId}</div>
-            <div>state: ${wizard.debug?.state || '-'}</div>
-            <div>zone: ${wizard.debug?.zone || '-'}</div>
-            <div>friendlyZone: ${wizard.debug?.friendlyZone || '-'}</div>
-            <div>locality: ${wizard.debug?.locality || '-'}</div>
-            <div>speed: ${wizard.debug?.speed ?? '-'}</div>
-            <div>moving: ${String(wizard.debug?.moving ?? false)}</div>
-            <div>proximity: ${wizard.debug?.proximity || '-'}</div>
-            <div>matchedBy: ${wizard.debug?.matchedBy?.length ? wizard.debug.matchedBy.join(', ') : 'none'}</div>
+            <div>${this.t.debugFields.entity}: ${wizard.entityId}</div>
+            <div>${this.t.debugFields.state}: ${wizard.debug?.state || '-'}</div>
+            <div>${this.t.debugFields.zone}: ${wizard.debug?.zone || '-'}</div>
+            <div>${this.t.debugFields.friendlyZone}: ${wizard.debug?.friendlyZone || '-'}</div>
+            <div>${this.t.debugFields.locality}: ${wizard.debug?.locality || '-'}</div>
+            <div>${this.t.debugFields.speed}: ${wizard.debug?.speed ?? '-'}</div>
+            <div>${this.t.debugFields.moving}: ${String(wizard.debug?.moving ?? false)}</div>
+            <div>${this.t.debugFields.proximity}: ${wizard.debug?.proximity || '-'}</div>
+            <div>${this.t.debugFields.matchedBy}: ${wizard.debug?.matchedBy?.length ? wizard.debug.matchedBy.join(', ') : this.t.debugMatchedNone}</div>
           </div>
         `)}
       </div>
@@ -1116,7 +1362,7 @@ class ZSWizardClockCard extends i$2 {
         return b `
       <ha-card>
         <div class="shell">
-          <div class="empty">Karta wymaga poprawnej konfiguracji miejsc i osób.</div>
+          <div class="empty">${this.t.emptyConfig}</div>
         </div>
       </ha-card>
     `;
@@ -1130,8 +1376,8 @@ class ZSWizardClockCard extends i$2 {
         <div class="backdrop"></div>
         <div class="shell">
           <div class="header">
-            <div class="eyebrow">Wizard Presence</div>
-            <div class="title">${this.config.title || 'Wizard Clock'}</div>
+            <div class="eyebrow">${this.t.eyebrow}</div>
+            <div class="title">${this.config.title || this.t.defaultTitle}</div>
             ${this.config.subtitle ? b `<div class="subtitle">${this.config.subtitle}</div>` : ''}
           </div>
           <div class="clock-wrap">
