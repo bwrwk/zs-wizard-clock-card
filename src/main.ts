@@ -211,6 +211,33 @@ function asArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+function normalizeList(value: any): string[] {
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((entry) => normalizeList(entry))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((entry) => normalize(entry))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value)
+      .flatMap((entry) => normalizeList(entry))
+      .filter(Boolean);
+  }
+
+  return [normalize(value)].filter(Boolean);
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -292,7 +319,7 @@ function getEntityObjectId(entityId: string): string {
 function getZoneMatchValues(place: PlaceConfig, hass: HomeAssistant): string[] {
   const values = new Set<string>();
 
-  for (const zoneEntityId of place.zone_entities || []) {
+  for (const zoneEntityId of asArray(place.zone_entities)) {
     const zoneEntity = hass.states?.[zoneEntityId];
     const objectId = getEntityObjectId(zoneEntityId);
 
@@ -333,7 +360,7 @@ function evaluateEntityCondition(condition: MatchEntityCondition, hass: HomeAssi
   }
 
   if (condition.states?.length) {
-    return condition.states.map(normalize).includes(normalize(rawValue));
+    return normalizeList(condition.states).includes(normalize(rawValue));
   }
 
   if (condition.above !== undefined) {
@@ -404,14 +431,15 @@ function matchesPlace(place: PlaceConfig, context: WizardContext, hass: HomeAssi
   const checks: boolean[] = [];
 
   if (match.states?.length) {
-    checks.push(match.states.map(normalize).includes(state));
+    checks.push(normalizeList(match.states).includes(state));
   }
 
   if (match.zones?.length) {
-    checks.push(match.zones.map(normalize).includes(zone));
+    const configuredZones = normalizeList(match.zones);
+    checks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
   }
 
-  if (place.zone_entities?.length) {
+  if (asArray(place.zone_entities).length) {
     const zoneMatches = getZoneMatchValues(place, hass);
     checks.push(
       zoneMatches.includes(zone)
@@ -421,7 +449,7 @@ function matchesPlace(place: PlaceConfig, context: WizardContext, hass: HomeAssi
   }
 
   if (match.localities?.length) {
-    checks.push(match.localities.map(normalize).includes(locality));
+    checks.push(normalizeList(match.localities).includes(locality));
   }
 
   if (match.min_speed !== undefined) {
@@ -437,7 +465,7 @@ function matchesPlace(place: PlaceConfig, context: WizardContext, hass: HomeAssi
   }
 
   if (match.proximity_directions?.length) {
-    checks.push(match.proximity_directions.map(normalize).includes(proximity));
+    checks.push(normalizeList(match.proximity_directions).includes(proximity));
   }
 
   if (match.unavailable) {
@@ -1012,6 +1040,22 @@ class ZSWizardClockCard extends LitElement {
 
     if (matched) {
       return matched;
+    }
+
+    if (normalize(context.state) === 'home') {
+      const homeLikePlace = this.config.places.find((place) => {
+        const zones = normalizeList(place.match?.zones);
+        const states = normalizeList(place.match?.states);
+        const zoneEntities = getZoneMatchValues(place, this.hass as HomeAssistant);
+        return normalize(place.id) === 'home'
+          || states.includes('home')
+          || zones.includes('home')
+          || zoneEntities.includes('home');
+      });
+
+      if (homeLikePlace) {
+        return homeLikePlace;
+      }
     }
 
     if (this.config.default_place) {

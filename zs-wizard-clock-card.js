@@ -110,6 +110,34 @@ function mergeConfig(config) {
 function normalize(value) {
     return String(value ?? '').trim().toLowerCase();
 }
+function asArray(value) {
+    if (value === undefined) {
+        return [];
+    }
+    return Array.isArray(value) ? value : [value];
+}
+function normalizeList(value) {
+    if (value === undefined || value === null || value === '') {
+        return [];
+    }
+    if (Array.isArray(value)) {
+        return value
+            .flatMap((entry) => normalizeList(entry))
+            .filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value
+            .split(',')
+            .map((entry) => normalize(entry))
+            .filter(Boolean);
+    }
+    if (typeof value === 'object') {
+        return Object.values(value)
+            .flatMap((entry) => normalizeList(entry))
+            .filter(Boolean);
+    }
+    return [normalize(value)].filter(Boolean);
+}
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
@@ -177,7 +205,7 @@ function getEntityObjectId(entityId) {
 }
 function getZoneMatchValues(place, hass) {
     const values = new Set();
-    for (const zoneEntityId of place.zone_entities || []) {
+    for (const zoneEntityId of asArray(place.zone_entities)) {
         const zoneEntity = hass.states?.[zoneEntityId];
         const objectId = getEntityObjectId(zoneEntityId);
         if (objectId) {
@@ -208,7 +236,7 @@ function evaluateEntityCondition(condition, hass) {
         return String(rawValue) === String(condition.state);
     }
     if (condition.states?.length) {
-        return condition.states.map(normalize).includes(normalize(rawValue));
+        return normalizeList(condition.states).includes(normalize(rawValue));
     }
     if (condition.above !== undefined) {
         return Number(rawValue) > Number(condition.above);
@@ -269,19 +297,20 @@ function matchesPlace(place, context, hass) {
     const proximity = normalize(context.proximity);
     const checks = [];
     if (match.states?.length) {
-        checks.push(match.states.map(normalize).includes(state));
+        checks.push(normalizeList(match.states).includes(state));
     }
     if (match.zones?.length) {
-        checks.push(match.zones.map(normalize).includes(zone));
+        const configuredZones = normalizeList(match.zones);
+        checks.push(configuredZones.includes(zone) || configuredZones.includes(state) || configuredZones.includes(friendlyZone));
     }
-    if (place.zone_entities?.length) {
+    if (asArray(place.zone_entities).length) {
         const zoneMatches = getZoneMatchValues(place, hass);
         checks.push(zoneMatches.includes(zone)
             || zoneMatches.includes(state)
             || zoneMatches.includes(friendlyZone));
     }
     if (match.localities?.length) {
-        checks.push(match.localities.map(normalize).includes(locality));
+        checks.push(normalizeList(match.localities).includes(locality));
     }
     if (match.min_speed !== undefined) {
         checks.push(context.speed >= Number(match.min_speed));
@@ -293,7 +322,7 @@ function matchesPlace(place, context, hass) {
         checks.push(context.moving === Boolean(match.moving));
     }
     if (match.proximity_directions?.length) {
-        checks.push(match.proximity_directions.map(normalize).includes(proximity));
+        checks.push(normalizeList(match.proximity_directions).includes(proximity));
     }
     if (match.unavailable) {
         checks.push(context.unavailable);
@@ -638,6 +667,20 @@ class ZSWizardClockCard extends i$2 {
         const matched = this.orderedPlaces.find((place) => matchesPlace(place, context, this.hass));
         if (matched) {
             return matched;
+        }
+        if (normalize(context.state) === 'home') {
+            const homeLikePlace = this.config.places.find((place) => {
+                const zones = normalizeList(place.match?.zones);
+                const states = normalizeList(place.match?.states);
+                const zoneEntities = getZoneMatchValues(place, this.hass);
+                return normalize(place.id) === 'home'
+                    || states.includes('home')
+                    || zones.includes('home')
+                    || zoneEntities.includes('home');
+            });
+            if (homeLikePlace) {
+                return homeLikePlace;
+            }
         }
         if (this.config.default_place) {
             const configuredDefault = this.config.places.find((place) => place.id === this.config.default_place);
