@@ -282,6 +282,234 @@ function matchesPlace(place, context, hass) {
     return checks.length > 0 && checks.every(Boolean);
 }
 class ZSWizardClockCard extends i$2 {
+    static getStubConfig() {
+        return {
+            type: `custom:${CARD_TAG}`,
+            title: 'Family Clock',
+            subtitle: 'The Burrow',
+            default_place: 'unknown',
+            style: {
+                preset: 'brass',
+                show_place_sectors: false,
+                show_center_panel: true,
+                show_legend: true,
+            },
+            places: [
+                {
+                    id: 'home',
+                    label: 'W domu',
+                    match: {
+                        states: ['home'],
+                        zones: ['home'],
+                    },
+                },
+                {
+                    id: 'travelling',
+                    label: 'W podróży',
+                    kind: 'transient',
+                    priority: 80,
+                    match: {
+                        moving: true,
+                        min_speed: 8,
+                    },
+                },
+                {
+                    id: 'unknown',
+                    label: 'Nieznane',
+                    kind: 'fallback',
+                },
+            ],
+            wizards: [
+                {
+                    entity: 'person.example',
+                    name: 'Harry',
+                },
+            ],
+        };
+    }
+    static getConfigForm() {
+        return {
+            schema: [
+                { name: 'title', selector: { text: {} } },
+                { name: 'subtitle', selector: { text: {} } },
+                { name: 'default_place', selector: { text: {} } },
+                {
+                    type: 'expandable',
+                    name: 'style',
+                    title: 'Style',
+                    schema: [
+                        {
+                            name: 'preset',
+                            selector: {
+                                select: {
+                                    options: [
+                                        { value: 'brass', label: 'Brass' },
+                                        { value: 'parchment', label: 'Parchment' },
+                                        { value: 'ministry', label: 'Ministry' },
+                                    ],
+                                },
+                            },
+                        },
+                        { name: 'ha_theme', selector: { theme: {} } },
+                        { name: 'accent_color', selector: { text: {} } },
+                        { name: 'background', selector: { text: {} } },
+                        { name: 'text_color', selector: { text: {} } },
+                        { name: 'inner_glow', selector: { boolean: {} } },
+                        { name: 'danger_glow', selector: { boolean: {} } },
+                        { name: 'show_legend', selector: { boolean: {} } },
+                        { name: 'show_center_panel', selector: { boolean: {} } },
+                        { name: 'show_place_sectors', selector: { boolean: {} } },
+                        {
+                            name: 'sector_opacity',
+                            selector: {
+                                number: {
+                                    min: 0,
+                                    max: 1,
+                                    step: 0.05,
+                                    mode: 'slider',
+                                },
+                            },
+                        },
+                    ],
+                },
+                {
+                    name: 'places',
+                    selector: {
+                        object: {
+                            multiple: true,
+                            label_field: 'label',
+                            description_field: 'id',
+                            fields: {
+                                id: { required: true, selector: { text: {} } },
+                                label: { required: true, selector: { text: {} } },
+                                short_label: { selector: { text: {} } },
+                                kind: {
+                                    selector: {
+                                        select: {
+                                            options: [
+                                                { value: 'place', label: 'Place' },
+                                                { value: 'transient', label: 'Transient' },
+                                                { value: 'alert', label: 'Alert' },
+                                                { value: 'fallback', label: 'Fallback' },
+                                            ],
+                                        },
+                                    },
+                                },
+                                priority: {
+                                    selector: {
+                                        number: { min: 0, max: 100, step: 1, mode: 'box' },
+                                    },
+                                },
+                                color: { selector: { text: {} } },
+                                match: {
+                                    selector: {
+                                        object: {
+                                            fields: {
+                                                states: { selector: { object: {} } },
+                                                zones: { selector: { object: {} } },
+                                                localities: { selector: { object: {} } },
+                                                min_speed: {
+                                                    selector: {
+                                                        number: { min: 0, max: 300, step: 1, mode: 'box' },
+                                                    },
+                                                },
+                                                max_speed: {
+                                                    selector: {
+                                                        number: { min: 0, max: 300, step: 1, mode: 'box' },
+                                                    },
+                                                },
+                                                moving: { selector: { boolean: {} } },
+                                                unavailable: { selector: { boolean: {} } },
+                                                unknown: { selector: { boolean: {} } },
+                                                not_home: { selector: { boolean: {} } },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                {
+                    name: 'wizards',
+                    selector: {
+                        object: {
+                            multiple: true,
+                            label_field: 'name',
+                            description_field: 'entity',
+                            fields: {
+                                entity: { required: true, selector: { entity: {} } },
+                                name: { selector: { text: {} } },
+                                color: { selector: { text: {} } },
+                                text_color: { selector: { text: {} } },
+                                ring_color: { selector: { text: {} } },
+                                avatar: { selector: { text: {} } },
+                                show_avatar: { selector: { boolean: {} } },
+                                proximity_entity: { selector: { entity: {} } },
+                            },
+                        },
+                    },
+                },
+            ],
+            computeLabel: (schema) => {
+                const labels = {
+                    title: 'Title',
+                    subtitle: 'Subtitle',
+                    default_place: 'Default place',
+                    preset: 'Preset',
+                    ha_theme: 'Home Assistant theme',
+                    accent_color: 'Accent color',
+                    background: 'Background',
+                    text_color: 'Text color',
+                    inner_glow: 'Inner glow',
+                    danger_glow: 'Danger glow',
+                    show_legend: 'Show legend',
+                    show_center_panel: 'Show center panel',
+                    show_place_sectors: 'Show place sectors',
+                    sector_opacity: 'Sector opacity',
+                    places: 'Places',
+                    wizards: 'Wizards',
+                    id: 'ID',
+                    label: 'Label',
+                    short_label: 'Short label',
+                    kind: 'Kind',
+                    priority: 'Priority',
+                    color: 'Color',
+                    match: 'Match rules',
+                    states: 'States',
+                    zones: 'Zones',
+                    localities: 'Localities',
+                    min_speed: 'Min speed',
+                    max_speed: 'Max speed',
+                    moving: 'Moving',
+                    unavailable: 'Unavailable',
+                    unknown: 'Unknown',
+                    not_home: 'Not home',
+                    entity: 'Entity',
+                    name: 'Name',
+                    ring_color: 'Ring color',
+                    avatar: 'Avatar URL',
+                    show_avatar: 'Use entity picture',
+                    proximity_entity: 'Proximity entity',
+                };
+                return labels[schema.name] || schema.name;
+            },
+            computeHelper: (schema) => {
+                const helpers = {
+                    default_place: 'Fallback place ID used when no matching rule is found.',
+                    show_place_sectors: 'Shows subtle colored sectors behind place labels on the dial.',
+                    sector_opacity: 'Controls how visible the sectors are when enabled.',
+                    places: 'Define locations shown around the dial and how they match entity states.',
+                    wizards: 'Tracked people, device trackers or calendars shown as clock hands.',
+                    match: 'Basic rule editor for common matching cases. Advanced YAML fields still work.',
+                    avatar: 'Optional image URL used instead of entity_picture.',
+                    show_avatar: 'If enabled, uses entity_picture when available.',
+                    proximity_entity: 'Optional sensor used to detect motion direction.',
+                };
+                return helpers[schema.name];
+            },
+        };
+    }
     setConfig(config) {
         if (!config?.places?.length) {
             throw new Error('Specify at least one place in `places`.');

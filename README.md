@@ -12,7 +12,7 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 - flexible place matching with zone, state, locality, speed and proximity rules
 - theme-aware visual presets for a magical brass-and-enamel look
 
-## Features in v0.2.0
+## Features in v0.3.0
 
 - Circular SVG clock face with decorative outer rings
 - Configurable places around the dial
@@ -26,6 +26,7 @@ An elegant wizard-style family location clock for Home Assistant Lovelace.
 - Center medallion with summary state
 - Optional place sectors on the dial
 - Legend with each wizard's resolved status
+- Basic Home Assistant config editor support
 - Visual presets: `brass`, `parchment`, `ministry`
 
 ## Installation
@@ -134,6 +135,17 @@ Supported `style` fields:
 - `show_center_panel`
 - `show_place_sectors`
 - `sector_opacity`
+
+## v0.3 editor support
+
+The card now exposes a basic Home Assistant config editor, including a dedicated toggle for:
+
+- `Show place sectors`
+- `Show center panel`
+- `Show legend`
+- preset selection and core style options
+
+Advanced matching is still easiest in YAML for now, but common card setup can already be done in the UI.
 
 Example:
 
