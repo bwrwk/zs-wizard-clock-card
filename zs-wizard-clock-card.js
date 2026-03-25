@@ -1286,32 +1286,34 @@ class ZSWizardClockCard extends i$2 {
               stroke="color-mix(in srgb, var(--zs-clock-accent) 52%, white)"
               stroke-width="0.35"
             ></circle>
+          </g>
+          <g>
             <text
               x="50"
-              y="47.8"
+              y="71.5"
               text-anchor="middle"
               font-family="var(--zs-clock-title)"
-              font-size="2.5"
+              font-size="2.45"
               fill=${this.fallbackTextColor}
             >
               ${this.summaryPlace?.short_label || this.summaryPlace?.label || this.t.defaultTitle}
             </text>
             <text
               x="50"
-              y="52"
+              y="75.2"
               text-anchor="middle"
               font-family="var(--zs-clock-copy)"
-              font-size="1.95"
+              font-size="1.85"
               fill="var(--zs-clock-muted)"
             >
               ${this.t.tracked(this.resolvedWizards.length)}
             </text>
             <text
               x="50"
-              y="55.4"
+              y="78.3"
               text-anchor="middle"
               font-family="var(--zs-clock-copy)"
-              font-size="1.75"
+              font-size="1.7"
               fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-muted)'}
             >
               ${this.alertCount ? this.t.alert(this.alertCount) : this.t.allWatched}
