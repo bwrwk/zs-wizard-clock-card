@@ -51,6 +51,8 @@ const PRESET_STYLES = {
     cardBackground: 'linear-gradient(180deg, rgba(76, 52, 28, 0.94), rgba(30, 20, 12, 0.98))',
     text: '#f8ecd2',
     muted: 'rgba(248, 236, 210, 0.74)',
+    dialText: '#5a3b19',
+    dialMuted: 'rgba(90, 59, 25, 0.72)',
     rim: '#3c2412',
     accent: '#d9b36e',
     face: '#efe1c3',
@@ -62,6 +64,8 @@ const PRESET_STYLES = {
     cardBackground: 'linear-gradient(180deg, rgba(113, 89, 51, 0.92), rgba(53, 38, 20, 0.97))',
     text: '#2d2417',
     muted: 'rgba(45, 36, 23, 0.62)',
+    dialText: '#503e22',
+    dialMuted: 'rgba(80, 62, 34, 0.74)',
     rim: '#715933',
     accent: '#b7873a',
     face: '#f5ebd2',
@@ -73,6 +77,8 @@ const PRESET_STYLES = {
     cardBackground: 'linear-gradient(180deg, rgba(14, 43, 47, 0.96), rgba(8, 23, 26, 0.99))',
     text: '#ebf6f4',
     muted: 'rgba(235, 246, 244, 0.74)',
+    dialText: '#20484b',
+    dialMuted: 'rgba(32, 72, 75, 0.72)',
     rim: '#0f3034',
     accent: '#6dc3b6',
     face: '#d7ebe5',
@@ -278,6 +284,9 @@ class ZSWizardClockCard extends LitElement {
             { name: 'accent_color', selector: { text: {} } },
             { name: 'background', selector: { text: {} } },
             { name: 'text_color', selector: { text: {} } },
+            { name: 'dial_text_color', selector: { text: {} } },
+            { name: 'dial_muted_text_color', selector: { text: {} } },
+            { name: 'hand_text_color', selector: { text: {} } },
             { name: 'inner_glow', selector: { boolean: {} } },
             { name: 'danger_glow', selector: { boolean: {} } },
             { name: 'show_legend', selector: { boolean: {} } },
@@ -465,6 +474,8 @@ class ZSWizardClockCard extends LitElement {
       --zs-clock-card-bg: linear-gradient(180deg, rgba(76, 52, 28, 0.94), rgba(30, 20, 12, 0.98));
       --zs-clock-text: #f8ecd2;
       --zs-clock-muted: rgba(248, 236, 210, 0.74);
+      --zs-clock-dial-text: #5a3b19;
+      --zs-clock-dial-muted: rgba(90, 59, 25, 0.72);
       --zs-clock-accent: #d9b36e;
       --zs-clock-rim: #3c2412;
       --zs-clock-face: #efe1c3;
@@ -556,7 +567,7 @@ class ZSWizardClockCard extends LitElement {
     .place-label {
       font-family: var(--zs-clock-title);
       letter-spacing: 0.08em;
-      fill: color-mix(in srgb, var(--zs-clock-rim) 80%, black);
+      fill: var(--zs-clock-dial-text);
       text-transform: uppercase;
     }
 
@@ -570,6 +581,10 @@ class ZSWizardClockCard extends LitElement {
       font-size: 3px;
       letter-spacing: 0.04em;
       pointer-events: none;
+      paint-order: stroke fill;
+      stroke: rgba(49, 28, 12, 0.4);
+      stroke-width: 0.6px;
+      stroke-linejoin: round;
     }
 
     .legend {
@@ -729,6 +744,18 @@ class ZSWizardClockCard extends LitElement {
     return this.config.style?.text_color || this.selectedPreset.text;
   }
 
+  get dialTextColor(): string {
+    return this.config.style?.dial_text_color || this.selectedPreset.dialText;
+  }
+
+  get dialMutedTextColor(): string {
+    return this.config.style?.dial_muted_text_color || this.selectedPreset.dialMuted;
+  }
+
+  get handTextColor(): string {
+    return this.config.style?.hand_text_color || '#fff8ed';
+  }
+
   get summaryPlace(): PlaceConfig | undefined {
     const alerts = this.resolvedWizards.filter((wizard) => wizard.place.kind === 'alert');
     if (alerts.length) {
@@ -799,7 +826,7 @@ class ZSWizardClockCard extends LitElement {
         name,
         initials: computeInitials(name),
         color: wizard.color || `hsl(${(index * 83 + 12) % 360} 52% 38%)`,
-        textColor: wizard.text_color || '#fff8ed',
+        textColor: wizard.text_color || this.handTextColor,
         ringColor: wizard.ring_color || 'rgba(255, 248, 230, 0.42)',
         entityId: wizard.entity,
         place,
@@ -837,6 +864,8 @@ class ZSWizardClockCard extends LitElement {
       '--zs-clock-card-bg': this.config.style?.background || preset.cardBackground,
       '--zs-clock-text': this.config.style?.text_color || preset.text,
       '--zs-clock-muted': preset.muted,
+      '--zs-clock-dial-text': this.config.style?.dial_text_color || preset.dialText,
+      '--zs-clock-dial-muted': this.config.style?.dial_muted_text_color || preset.dialMuted,
       '--zs-clock-accent': this.config.style?.accent_color || preset.accent,
       '--zs-clock-rim': preset.rim,
       '--zs-clock-face': preset.face,
@@ -987,7 +1016,7 @@ class ZSWizardClockCard extends LitElement {
             ></line>
             <text
               class="place-label"
-              fill=${place.label_color || 'color-mix(in srgb, var(--zs-clock-rim) 80%, black)'}
+              fill=${place.label_color || 'var(--zs-clock-dial-text)'}
               font-size=${getPlaceLabelFontSize(place)}
               lengthAdjust="spacingAndGlyphs"
             >
@@ -1025,7 +1054,7 @@ class ZSWizardClockCard extends LitElement {
               text-anchor="middle"
               font-family="var(--zs-clock-title)"
               font-size="2.45"
-              fill=${this.fallbackTextColor}
+              fill="var(--zs-clock-dial-text)"
             >
               ${this.summaryPlace?.short_label || this.summaryPlace?.label || this.t.defaultTitle}
             </text>
@@ -1035,7 +1064,7 @@ class ZSWizardClockCard extends LitElement {
               text-anchor="middle"
               font-family="var(--zs-clock-copy)"
               font-size="1.85"
-              fill="var(--zs-clock-muted)"
+              fill="var(--zs-clock-dial-muted)"
             >
               ${this.t.tracked(this.resolvedWizards.length)}
             </text>
@@ -1045,7 +1074,7 @@ class ZSWizardClockCard extends LitElement {
               text-anchor="middle"
               font-family="var(--zs-clock-copy)"
               font-size="1.7"
-              fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-muted)'}
+              fill=${this.alertCount ? '#b33a27' : 'var(--zs-clock-dial-muted)'}
             >
               ${this.alertCount ? this.t.alert(this.alertCount) : this.t.allWatched}
             </text>

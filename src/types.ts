@@ -84,6 +84,9 @@ export type CardConfig = {
     accent_color?: string;
     background?: string;
     text_color?: string;
+    dial_text_color?: string;
+    dial_muted_text_color?: string;
+    hand_text_color?: string;
     inner_glow?: boolean;
     danger_glow?: boolean;
     show_legend?: boolean;

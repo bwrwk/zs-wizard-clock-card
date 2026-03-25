@@ -202,6 +202,17 @@ This covers card copy such as:
 
 User-defined place labels remain exactly as configured in YAML.
 
+## Color Layers
+
+The card now separates text colors used in different areas:
+
+- `text_color` controls the text above and around the dial
+- `dial_text_color` controls primary text drawn on the dial
+- `dial_muted_text_color` controls secondary text on the dial
+- `hand_text_color` controls default text shown on hands
+
+This makes it possible to keep a bright title while using darker, more readable text on the clock face itself.
+
 ## Validation
 
 The card validates configuration and surfaces clear errors for:
